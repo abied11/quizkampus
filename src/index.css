@@ -1,0 +1,409 @@
+@import "tailwindcss";
+
+@theme {
+  --color-uir-green-dark: #004029;
+  --color-uir-green-darker: #033523;
+  --color-uir-green-medium: #065D3E;
+  --color-uir-green-bright: #168A26;
+  --color-uir-green-muted: #92C2A0;
+  
+  --color-uir-yellow-gold: #FFB102;
+  --color-uir-yellow-accent: #FFD600;
+  --color-uir-yellow-dark: #D39E00;
+  --color-uir-yellow-border: #FCBE13;
+  --color-uir-yellow-hover: #FCB444;
+}
+
+@layer base {
+  body {
+    @apply bg-[#021812] text-slate-100 min-h-screen antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* ─── Glassmorphism custom classes ──────────────────────────────────── */
+.glass {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-card {
+  background: rgba(30, 41, 59, 0.3);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glass-input {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: white;
+  transition: all 0.2s ease-in-out;
+}
+
+.glass-input:focus {
+  border-color: rgba(255, 177, 2, 0.5);
+  box-shadow: 0 0 0 2px rgba(255, 177, 2, 0.2);
+  outline: none;
+}
+
+.glass-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glass-hover:hover {
+  background: rgba(30, 41, 59, 0.5);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  transform: translateY(-2px);
+}
+
+/* ─── Animations ─────────────────────────────────────────────────────── */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 12px rgba(6, 93, 62, 0.3); }
+  50%       { box-shadow: 0 0 28px rgba(255, 177, 2, 0.5); }
+}
+
+@keyframes floatUp {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-8px); }
+}
+
+@keyframes countUp {
+  from { opacity: 0; transform: scale(0.8); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes notifPing {
+  75%, 100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+@keyframes progressFill {
+  from { width: 0%; }
+  to   { width: var(--target-width); }
+}
+
+/* ─── Animation utility classes ─────────────────────────────────────── */
+.animate-fade-in-up {
+  animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-fade-in {
+  animation: fadeIn 0.3s ease both;
+}
+.animate-slide-in-left {
+  animation: slideInLeft 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-slide-in-right {
+  animation: slideInRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-scale-in {
+  animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-float {
+  animation: floatUp 3s ease-in-out infinite;
+}
+.animate-pulse-glow {
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+.animate-count-up {
+  animation: countUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Stagger delays */
+.delay-75  { animation-delay: 75ms; }
+.delay-100 { animation-delay: 100ms; }
+.delay-150 { animation-delay: 150ms; }
+.delay-200 { animation-delay: 200ms; }
+.delay-300 { animation-delay: 300ms; }
+.delay-400 { animation-delay: 400ms; }
+.delay-500 { animation-delay: 500ms; }
+
+/* ─── Shimmer skeleton loading ───────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(30, 41, 59, 0.4) 25%,
+    rgba(51, 65, 85, 0.5) 50%,
+    rgba(30, 41, 59, 0.4) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+/* ─── Notification ping ──────────────────────────────────────────────── */
+.notif-ping::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  animation: notifPing 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+  background: rgb(239 68 68);
+}
+
+/* ─── Stat card gradient borders ─────────────────────────────────────── */
+.stat-card-blue {
+  background: linear-gradient(135deg, rgba(6,93,62,0.08) 0%, rgba(3,53,35,0.05) 100%);
+  border: 1px solid rgba(6,93,62,0.2);
+}
+.stat-card-emerald {
+  background: linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(5,150,105,0.05) 100%);
+  border: 1px solid rgba(16,185,129,0.2);
+}
+.stat-card-amber {
+  background: linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(217,119,6,0.05) 100%);
+  border: 1px solid rgba(245,158,11,0.2);
+}
+.stat-card-purple {
+  background: linear-gradient(135deg, rgba(255,177,2,0.08) 0%, rgba(211,158,0,0.05) 100%);
+  border: 1px solid rgba(255,177,2,0.2);
+}
+.stat-card-red {
+  background: linear-gradient(135deg, rgba(239,68,68,0.08) 0%, rgba(220,38,38,0.05) 100%);
+  border: 1px solid rgba(239,68,68,0.2);
+}
+
+/* ─── Custom Scrollbar ───────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.3);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ─── Tab indicator transition ───────────────────────────────────────── */
+.tab-active-indicator {
+  position: relative;
+  overflow: hidden;
+}
+.tab-active-indicator::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #065D3E, #FFB102);
+  border-radius: 2px 2px 0 0;
+}
+
+/* ─── Gradient text ──────────────────────────────────────────────────── */
+.gradient-text-blue {
+  background: linear-gradient(135deg, #FFD600, #92C2A0);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.gradient-text-emerald {
+  background: linear-gradient(135deg, #34d399, #059669);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.gradient-text-amber {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Progress bar animated fill ─────────────────────────────────────── */
+.progress-bar-animated {
+  transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ─── Hover lift effect ──────────────────────────────────────────────── */
+.hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* ─── Glow borders ───────────────────────────────────────────────────── */
+.glow-blue {
+  box-shadow: 0 0 0 1px rgba(6, 93, 62, 0.3), 0 4px 24px rgba(255, 177, 2, 0.15);
+}
+.glow-emerald {
+  box-shadow: 0 0 0 1px rgba(16,185,129,0.3), 0 4px 24px rgba(16,185,129,0.15);
+}
+.glow-purple {
+  box-shadow: 0 0 0 1px rgba(168,85,247,0.3), 0 4px 24px rgba(168,85,247,0.15);
+}
+.glow-red {
+  box-shadow: 0 0 0 1px rgba(239,68,68,0.3), 0 4px 24px rgba(239,68,68,0.15);
+}
+
+/* ─── Animated orb backgrounds ───────────────────────────────────────────── */
+@keyframes orbFloat {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  33%       { transform: translate(30px, -50px) scale(1.1); }
+  66%       { transform: translate(-20px, 20px) scale(0.9); }
+}
+@keyframes orbFloat2 {
+  0%, 100% { transform: translate(0px, 0px) scale(1); }
+  33%       { transform: translate(-40px, 30px) scale(1.05); }
+  66%       { transform: translate(30px, -30px) scale(0.95); }
+}
+@keyframes borderGlow {
+  0%, 100% { border-color: rgba(6, 93, 62, 0.2); box-shadow: 0 0 12px rgba(6, 93, 62, 0.1); }
+  50%       { border-color: rgba(255, 177, 2, 0.4); box-shadow: 0 0 24px rgba(255, 177, 2, 0.2); }
+}
+@keyframes cardReveal {
+  from { opacity: 0; transform: translateY(24px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes confettiFall {
+  0%   { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(40px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scoreReveal {
+  0%   { transform: scale(0.3); opacity: 0; }
+  60%  { transform: scale(1.15); opacity: 1; }
+  80%  { transform: scale(0.95); }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes violationSlide {
+  from { transform: translateY(-120%) translateX(-50%); opacity: 0; }
+  to   { transform: translateY(0%) translateX(-50%); opacity: 1; }
+}
+
+.animate-orb-1 { animation: orbFloat 14s ease-in-out infinite; }
+.animate-orb-2 { animation: orbFloat2 18s ease-in-out infinite; }
+.animate-border-glow { animation: borderGlow 4s ease-in-out infinite; }
+.animate-card-reveal { animation: cardReveal 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-slide-up { animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-score-reveal { animation: scoreReveal 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.animate-violation-slide { animation: violationSlide 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* ─── Premium nav item glow ─────────────────────────────────────────────── */
+.nav-item-active {
+  background: linear-gradient(135deg, rgba(0, 64, 41, 0.25) 0%, rgba(6, 93, 62, 0.2) 100%);
+  border: 1px solid rgba(6, 93, 62, 0.3);
+  box-shadow: 0 0 20px rgba(6, 93, 62, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* ─── Glassmorphism premium card ─────────────────────────────────────────── */
+.glass-premium {
+  background: linear-gradient(135deg, rgba(30,41,59,0.6) 0%, rgba(15,23,42,0.8) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* ─── Confetti particles ─────────────────────────────────────────────────── */
+.confetti-container {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 999;
+}
+.confetti-piece {
+  position: absolute;
+  top: -10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  animation: confettiFall linear forwards;
+}
+
+/* ─── Auth page orb ─────────────────────────────────────────────────────── */
+.auth-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(80px);
+  pointer-events: none;
+}
+
+/* ─── Sidebar premium ────────────────────────────────────────────────────── */
+.sidebar-gradient {
+  background: linear-gradient(180deg, rgba(0, 64, 41, 0.95) 0%, rgba(3, 53, 35, 0.9) 100%);
+}
+
+/* ─── Score gradient text ────────────────────────────────────────────────── */
+.score-gradient-pass {
+  background: linear-gradient(135deg, #34d399, #10b981);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.score-gradient-fail {
+  background: linear-gradient(135deg, #f87171, #ef4444);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
