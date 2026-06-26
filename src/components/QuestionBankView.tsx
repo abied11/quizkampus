@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { dbSaveQuestion, dbDeleteQuestion, dbBulkUploadQuestions } from '../dbService';
 import type { Question } from '../dbService';
-import { Search, Plus, Trash2, Edit2, Upload, Download, Check, AlertCircle, X, HelpCircle, GraduationCap, Link2, PlusCircle, MinusCircle } from 'lucide-react';
-import { useAppContext } from '../AppContext';
+import { Search, Plus, Trash2, Edit2, Upload, Download, Check, AlertCircle, X, HelpCircle, GraduationCap, Link2, PlusCircle, MinusCircle, Sparkles, FileSpreadsheet } from 'lucide-react';
+import { useAppContext } from '../hooks/useAppContext';
+import { generateQuestionsWithAI } from '../utils/aiQuestionGenerator';
+import * as XLSX from 'xlsx';
 
 export const QuestionBankView: React.FC = () => {
   const { questions, refreshQuestions } = useAppContext();
@@ -28,6 +30,13 @@ export const QuestionBankView: React.FC = () => {
   const [csvContent, setCsvContent] = useState('');
   const [uploadResult, setUploadResult] = useState<{ success: number; errors: string[] } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [showAIGenerator, setShowAIGenerator] = useState(false);
+  const [aiSubject, setAiSubject] = useState('');
+  const [aiTopic, setAiTopic] = useState('');
+  const [aiCount, setAiCount] = useState(5);
+  const [aiDifficulty, setAiDifficulty] = useState<Question['difficulty']>('medium');
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiPreview, setAiPreview] = useState<Omit<Question, 'id'>[]>([]);
 
   // Matching pairs state: [{left, right}]
   const [matchingPairs, setMatchingPairs] = useState<{ left: string; right: string }[]>([
@@ -188,6 +197,45 @@ export const QuestionBankView: React.FC = () => {
   const subjects = Array.from(new Set(questions.map(q => q.subject)));
 
   // Filter questions
+  const handleExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploading(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_csv(sheet);
+      const res = await dbBulkUploadQuestions(rows);
+      setUploadResult({ success: res.successCount, errors: res.errors });
+      await refreshQuestions();
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Gagal import Excel');
+    } finally {
+      setIsUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleAIGenerate = async () => {
+    if (!aiSubject || !aiTopic) return;
+    setAiGenerating(true);
+    try {
+      setAiPreview(await generateQuestionsWithAI({ subject: aiSubject, topic: aiTopic, count: aiCount, difficulty: aiDifficulty }));
+    } finally {
+      setAiGenerating(false);
+    }
+  };
+
+  const handleSaveAIPreview = async () => {
+    for (const q of aiPreview) {
+      await dbSaveQuestion(q);
+    }
+    await refreshQuestions();
+    setShowAIGenerator(false);
+    setAiPreview([]);
+  };
+
   const filteredQuestions = questions.filter(q => {
     const matchSearch = q.text.toLowerCase().includes(search.toLowerCase()) || 
                         q.topic.toLowerCase().includes(search.toLowerCase());
@@ -208,6 +256,18 @@ export const QuestionBankView: React.FC = () => {
         </div>
         
         <div className="flex flex-wrap gap-2">
+          <label className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 text-sm font-semibold flex items-center gap-2 cursor-pointer">
+            <FileSpreadsheet className="h-4 w-4" />
+            Import Excel
+            <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcelUpload} disabled={isUploading} />
+          </label>
+          <button
+            onClick={() => setShowAIGenerator(true)}
+            className="px-4 py-2.5 rounded-xl bg-indigo-950/40 border border-indigo-500/30 text-indigo-300 text-sm font-semibold flex items-center gap-2"
+          >
+            <Sparkles className="h-4 w-4" />
+            Generate AI
+          </button>
           <button
             onClick={() => setShowCSVUpload(true)}
             className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 text-sm font-semibold flex items-center gap-2 transition-all active:scale-95"
@@ -826,6 +886,42 @@ export const QuestionBankView: React.FC = () => {
                 </div>
               )}
             </form>
+          </div>
+        </div>
+      )}
+      {/* AI Generator Modal */}
+      {showAIGenerator && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="glass rounded-3xl w-full max-w-lg border border-slate-800 p-6 space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-indigo-400" /> Generate Soal dengan AI
+              </h3>
+              <button onClick={() => setShowAIGenerator(false)}><X className="h-5 w-5 text-slate-400" /></button>
+            </div>
+            <input placeholder="Mata Kuliah" value={aiSubject} onChange={e => setAiSubject(e.target.value)} className="w-full px-3 py-2.5 rounded-xl glass-input text-sm" />
+            <input placeholder="Topik" value={aiTopic} onChange={e => setAiTopic(e.target.value)} className="w-full px-3 py-2.5 rounded-xl glass-input text-sm" />
+            <div className="grid grid-cols-2 gap-3">
+              <input type="number" min={1} max={10} value={aiCount} onChange={e => setAiCount(+e.target.value)} className="px-3 py-2.5 rounded-xl glass-input text-sm" />
+              <select value={aiDifficulty} onChange={e => setAiDifficulty(e.target.value as Question['difficulty'])} className="px-3 py-2.5 rounded-xl glass-input text-sm">
+                <option value="easy">Mudah</option>
+                <option value="medium">Sedang</option>
+                <option value="hard">Sulit</option>
+              </select>
+            </div>
+            <button onClick={handleAIGenerate} disabled={aiGenerating} className="w-full py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold">
+              {aiGenerating ? 'Menghasilkan...' : 'Generate Draft'}
+            </button>
+            {aiPreview.length > 0 && (
+              <div className="max-h-40 overflow-y-auto space-y-2 text-xs text-slate-300">
+                {aiPreview.map((q, i) => <p key={i}>• {q.text}</p>)}
+              </div>
+            )}
+            {aiPreview.length > 0 && (
+              <button onClick={handleSaveAIPreview} className="w-full py-2.5 rounded-xl bg-uir-green-medium text-white text-sm font-semibold">
+                Simpan {aiPreview.length} Soal ke Bank
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -5,25 +5,31 @@ import { SessionManagerView } from './SessionManagerView';
 import { ResultsAnalyticsView } from './ResultsAnalyticsView';
 import { LeaderboardScreen } from './LeaderboardScreen';
 import { UserManagementView } from './UserManagementView';
+import { LiveMonitorView } from './LiveMonitorView';
 import { NotificationBell } from './NotificationBell';
-import { BookOpen, Calendar, BarChart2, Trophy, LogOut, GraduationCap, ChevronRight, Users } from 'lucide-react';
+import { BookOpen, Calendar, BarChart2, Trophy, LogOut, GraduationCap, ChevronRight, Users, Activity, UserCircle } from 'lucide-react';
+import { ProfileView } from './ProfileView';
+import { UserAvatar } from './UserAvatar';
 
 interface DosenDashboardProps {
   user: User;
   onLogout: () => void;
+  onUserUpdated: (user: User) => void;
 }
 
-type DosenTab = 'questions' | 'sessions' | 'students' | 'results' | 'leaderboard';
+type DosenTab = 'questions' | 'sessions' | 'students' | 'results' | 'leaderboard' | 'monitor' | 'profile';
 
 const tabs: { id: DosenTab; label: string; icon: React.ElementType; desc: string }[] = [
   { id: 'questions',   label: 'Bank Soal',    icon: BookOpen,  desc: 'Kelola kumpulan soal kuis' },
   { id: 'sessions',    label: 'Sesi Kuis',    icon: Calendar,  desc: 'Atur jadwal dan konfigurasi ujian' },
+  { id: 'monitor',     label: 'Monitor Live', icon: Activity,  desc: 'Pantau peserta real-time' },
   { id: 'students',    label: 'Mahasiswa',    icon: Users,     desc: 'Monitor performa dan aktivitas mahasiswa' },
   { id: 'results',     label: 'Analitik Nilai', icon: BarChart2, desc: 'Lihat hasil dan statistik kelas' },
   { id: 'leaderboard', label: 'Peringkat',    icon: Trophy,    desc: 'Papan peringkat peserta kuis' },
+  { id: 'profile',     label: 'Profil',       icon: UserCircle, desc: 'Edit foto profil dan data diri' },
 ];
 
-export const DosenDashboard: React.FC<DosenDashboardProps> = ({ user, onLogout }) => {
+export const DosenDashboard: React.FC<DosenDashboardProps> = ({ user, onLogout, onUserUpdated }) => {
   const [activeTab, setActiveTab] = useState<DosenTab>('questions');
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
@@ -72,9 +78,12 @@ export const DosenDashboard: React.FC<DosenDashboardProps> = ({ user, onLogout }
         {/* User Profile at Bottom */}
         <div className="p-3 border-t border-slate-800/80 space-y-2">
           {sidebarOpen && (
-            <div className="px-3 py-2.5 rounded-xl bg-slate-950/40 animate-fade-in">
-              <p className="text-xs font-bold text-slate-200 truncate">{user.name}</p>
-              <p className="text-[10px] text-uir-yellow-gold font-semibold">Dosen • {user.class}</p>
+            <div className="px-3 py-2.5 rounded-xl bg-slate-950/40 animate-fade-in flex items-center gap-2.5">
+              <UserAvatar user={user} size="sm" />
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-200 truncate">{user.name}</p>
+                <p className="text-[10px] text-uir-yellow-gold font-semibold">Dosen • {user.class}</p>
+              </div>
             </div>
           )}
           <button
@@ -115,10 +124,12 @@ export const DosenDashboard: React.FC<DosenDashboardProps> = ({ user, onLogout }
         <div className="flex-1 p-6 overflow-y-auto">
           <div className="animate-fade-in-up">
             {activeTab === 'questions'   && <QuestionBankView />}
-            {activeTab === 'sessions'    && <SessionManagerView />}
+            {activeTab === 'sessions'    && <SessionManagerView user={user} />}
+            {activeTab === 'monitor'     && <LiveMonitorView />}
             {activeTab === 'students'    && <UserManagementView />}
             {activeTab === 'results'     && <ResultsAnalyticsView />}
             {activeTab === 'leaderboard' && <LeaderboardScreen />}
+            {activeTab === 'profile' && <ProfileView user={user} onUserUpdated={onUserUpdated} />}
           </div>
         </div>
       </main>

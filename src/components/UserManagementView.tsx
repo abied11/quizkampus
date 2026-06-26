@@ -6,7 +6,7 @@ import {
   CheckCircle, XCircle, AlertTriangle, BarChart2, BookOpen,
   ChevronDown, ChevronUp, Clock, Filter
 } from 'lucide-react';
-import { useAppContext } from '../AppContext';
+import { useAppContext } from '../hooks/useAppContext';
 
 export const UserManagementView: React.FC = () => {
   const [search, setSearch] = useState('');

@@ -1,6 +1,8 @@
 import React, { useMemo } from 'react';
 import { Trophy, Medal, Clock, Users } from 'lucide-react';
-import { useAppContext } from '../AppContext';
+import { useAppContext } from '../hooks/useAppContext';
+import { PodiumView } from './PodiumView';
+import { buildPodiumFromAttempts } from '../utils/scoring';
 
 interface LeaderboardScreenProps {
   filterSessionId?: string;
@@ -80,6 +82,10 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ filterSess
           <p className="text-slate-400 text-sm mt-1">Belum ada mahasiswa yang menyelesaikan sesi kuis ini.</p>
         </div>
       ) : (
+        <>
+        <div className="glass rounded-2xl p-6 border border-slate-800 mb-4">
+          <PodiumView entries={buildPodiumFromAttempts(leaderboard)} />
+        </div>
         <div className="space-y-3">
           {leaderboard.map((att, idx) => {
             const style = getRankStyle(idx);
@@ -132,6 +138,7 @@ export const LeaderboardScreen: React.FC<LeaderboardScreenProps> = ({ filterSess
             );
           })}
         </div>
+        </>
       )}
     </div>
   );

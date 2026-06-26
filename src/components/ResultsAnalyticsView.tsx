@@ -6,7 +6,7 @@ import {
   BarChart2, Download, Users, TrendingUp, AlertTriangle,
   CheckCircle, Clock, Trophy, Filter, Printer, FileSpreadsheet
 } from 'lucide-react';
-import { useAppContext } from '../AppContext';
+import { useAppContext } from '../hooks/useAppContext';
 
 export const ResultsAnalyticsView: React.FC = () => {
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');

@@ -9,8 +9,12 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   role TEXT NOT NULL CHECK (role IN ('dosen', 'mahasiswa')),
-  user_class TEXT NOT NULL DEFAULT ''
+  user_class TEXT NOT NULL DEFAULT '',
+  password_hash TEXT
 );
+
+-- Migration: tambahkan kolom password jika tabel sudah ada
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
 
 -- 2. Questions
 CREATE TABLE IF NOT EXISTS questions (
@@ -111,12 +115,18 @@ CREATE POLICY "Allow all" ON notifications FOR ALL USING (true) WITH CHECK (true
 -- ============================================================
 -- Seed Data (optional — matches original mock data)
 -- ============================================================
-INSERT INTO users (id, name, email, role, user_class) VALUES
-  ('u_dosen1', 'Dr. Budi Santoso', 'budi@kampus.ac.id', 'dosen', 'Informatika'),
-  ('u_mhs1',   'Adi Wijaya',       'adi@student.ac.id',  'mahasiswa', 'IF-2024-A'),
-  ('u_mhs2',   'Citra Lestari',    'citra@student.ac.id','mahasiswa', 'IF-2024-A'),
-  ('u_mhs3',   'Dedi Kurniawan',   'dedi@student.ac.id', 'mahasiswa', 'IF-2024-B')
+INSERT INTO users (id, name, email, role, user_class, password_hash) VALUES
+  ('u_dosen1', 'Dr. Budi Santoso', 'budi@kampus.ac.id', 'dosen', 'Informatika', '122b5e5ac1da9411fadea91fe923cd3392f431597087b4de4086e263734f6e7f'),
+  ('u_mhs1',   'Adi Wijaya',       'adi@student.ac.id',  'mahasiswa', 'IF-2024-A', 'ead3b86be5a15c64eaec1bc586852f4fd7af5dc69114881d96d54ff3ce77400d'),
+  ('u_mhs2',   'Citra Lestari',    'citra@student.ac.id','mahasiswa', 'IF-2024-A', '9da3a08e594d5ad501eacba60ff3315bdc6b03953513382b2b5c20575ef58109'),
+  ('u_mhs3',   'Dedi Kurniawan',   'dedi@student.ac.id', 'mahasiswa', 'IF-2024-B', '6e20f2d6a9567f67ef3f4fbbe3d2a74bcb0998059d10ac0844e2aeb5e104d47a')
 ON CONFLICT (id) DO NOTHING;
+
+-- Set password demo untuk akun seed yang sudah ada (password: demo123)
+UPDATE users SET password_hash = '122b5e5ac1da9411fadea91fe923cd3392f431597087b4de4086e263734f6e7f' WHERE id = 'u_dosen1' AND password_hash IS NULL;
+UPDATE users SET password_hash = 'ead3b86be5a15c64eaec1bc586852f4fd7af5dc69114881d96d54ff3ce77400d' WHERE id = 'u_mhs1' AND password_hash IS NULL;
+UPDATE users SET password_hash = '9da3a08e594d5ad501eacba60ff3315bdc6b03953513382b2b5c20575ef58109' WHERE id = 'u_mhs2' AND password_hash IS NULL;
+UPDATE users SET password_hash = '6e20f2d6a9567f67ef3f4fbbe3d2a74bcb0998059d10ac0844e2aeb5e104d47a' WHERE id = 'u_mhs3' AND password_hash IS NULL;
 
 INSERT INTO questions (id, subject, topic, type, text, options, correct_answer, explanation, difficulty) VALUES
   ('q1', 'Pemrograman Web', 'React JS', 'multiple_choice',

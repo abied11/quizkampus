@@ -4,26 +4,34 @@ import { QuizAttemptScreen } from './QuizAttemptScreen';
 import { LeaderboardScreen } from './LeaderboardScreen';
 import { StudentProgressView } from './StudentProgressView';
 import { NotificationBell } from './NotificationBell';
+import { FlashcardView } from './FlashcardView';
+import { ProfileView } from './ProfileView';
+import { UserAvatar } from './UserAvatar';
+import { isSoundEnabled, setSoundEnabled } from '../utils/sounds';
 import {
   GraduationCap, Play, Trophy, LogOut, ChevronRight,
-  User as UserIcon, BarChart2
+  User as UserIcon, BarChart2, Layers, Volume2, VolumeX, UserCircle
 } from 'lucide-react';
 
 interface MahasiswaDashboardProps {
   user: User;
   onLogout: () => void;
+  onUserUpdated: (user: User) => void;
 }
 
-type MhsTab = 'quiz' | 'progress' | 'leaderboard';
+type MhsTab = 'quiz' | 'flashcards' | 'progress' | 'leaderboard' | 'profile';
 
-export const MahasiswaDashboard: React.FC<MahasiswaDashboardProps> = ({ user, onLogout }) => {
+export const MahasiswaDashboard: React.FC<MahasiswaDashboardProps> = ({ user, onLogout, onUserUpdated }) => {
   const [activeTab, setActiveTab] = useState<MhsTab>('quiz');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [soundOn, setSoundOn] = useState(isSoundEnabled);
 
   const tabs: { id: MhsTab; label: string; icon: React.ElementType; desc: string }[] = [
     { id: 'quiz',        label: 'Ikuti Kuis',   icon: Play,     desc: 'Masukkan kode akses dan mulai ujian' },
-    { id: 'progress',   label: 'Progres Saya',  icon: BarChart2, desc: 'Pantau perkembangan nilai dan riwayat kuis' },
+    { id: 'flashcards',  label: 'Flashcard',    icon: Layers,   desc: 'Mode belajar kartu & spaced repetition' },
+    { id: 'progress',   label: 'Progres Saya',  icon: BarChart2, desc: 'Pantau perkembangan nilai, XP & badge' },
     { id: 'leaderboard', label: 'Peringkat',    icon: Trophy,   desc: 'Papan peringkat peserta kuis' },
+    { id: 'profile',     label: 'Profil',       icon: UserCircle, desc: 'Edit foto profil dan data diri' },
   ];
 
   const activeTabInfo = tabs.find(t => t.id === activeTab)!;
@@ -72,12 +80,10 @@ export const MahasiswaDashboard: React.FC<MahasiswaDashboardProps> = ({ user, on
         <div className="p-3 border-t border-slate-800/80 space-y-2">
           {sidebarOpen && (
             <div className="px-3 py-2.5 rounded-xl bg-slate-950/40 flex items-center gap-2.5 animate-fade-in">
-              <div className="h-7 w-7 rounded-lg bg-uir-green-medium/15 border border-uir-green-medium/20 flex items-center justify-center text-xs font-bold text-uir-green-muted">
-                {user.name.charAt(0)}
-              </div>
+              <UserAvatar user={user} size="sm" />
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-bold text-slate-200 truncate">{user.name}</p>
-                <p className="text-[10px] text-uir-yellow-gold font-semibold">{user.class}</p>
+                <p className="text-[10px] text-uir-yellow-gold font-semibold">{user.class} • {user.xp ?? 0} XP</p>
               </div>
             </div>
           )}
@@ -108,7 +114,13 @@ export const MahasiswaDashboard: React.FC<MahasiswaDashboardProps> = ({ user, on
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {/* Notification Bell */}
+            <button
+              onClick={() => { setSoundOn((v: boolean) => { const n = !v; setSoundEnabled(n); return n; }); }}
+              className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
+              title={soundOn ? 'Matikan suara' : 'Nyalakan suara'}
+            >
+              {soundOn ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+            </button>
             <NotificationBell user={user} />
             <div className="flex items-center gap-2 text-xs text-slate-400 hidden sm:flex">
               <UserIcon className="h-3.5 w-3.5" />
@@ -125,8 +137,10 @@ export const MahasiswaDashboard: React.FC<MahasiswaDashboardProps> = ({ user, on
                 onBack={() => setActiveTab('quiz')}
               />
             )}
+            {activeTab === 'flashcards' && <FlashcardView user={user} />}
             {activeTab === 'progress' && <StudentProgressView user={user} />}
             {activeTab === 'leaderboard' && <LeaderboardScreen />}
+            {activeTab === 'profile' && <ProfileView user={user} onUserUpdated={onUserUpdated} />}
           </div>
         </div>
       </main>

@@ -4,7 +4,7 @@ import {
 } from '../dbService';
 import type { Notification, User } from '../dbService';
 import { Bell, X, CheckCheck, Calendar, Trophy, Info, Lock, Trash2 } from 'lucide-react';
-import { useAppContext } from '../AppContext';
+import { useAppContext } from '../hooks/useAppContext';
 
 interface NotificationBellProps {
   user: User;

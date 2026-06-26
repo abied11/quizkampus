@@ -3,7 +3,7 @@ import * as faceapi from 'face-api.js';
 import { dbAddActivityLog } from '../dbService';
 import type { Attempt, User } from '../dbService';
 import { Camera, CameraOff, Eye, EyeOff, AlertTriangle, CheckCircle } from 'lucide-react';
-import { useAppContext } from '../AppContext';
+import { useAppContext } from '../hooks/useAppContext';
 
 interface WebcamProctorProps {
   attempt: Attempt;
@@ -22,7 +22,6 @@ export const WebcamProctor: React.FC<WebcamProctorProps> = ({ attempt, user, ena
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const noFaceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modelsLoadedRef = useRef(false);
 
   const { refreshLogs } = useAppContext();
@@ -112,7 +111,7 @@ export const WebcamProctor: React.FC<WebcamProctorProps> = ({ attempt, user, ena
     let noFaceLogged = false;
     let multiFaceLogged = false;
 
-    detectionIntervalRef.current = setInterval(async () => {
+    const intervalId = setInterval(async () => {
       if (!videoRef.current || videoRef.current.readyState < 2) return;
 
       try {
@@ -152,20 +151,22 @@ export const WebcamProctor: React.FC<WebcamProctorProps> = ({ attempt, user, ena
         // detection error, ignore
       }
     }, DETECTION_INTERVAL_MS);
+    detectionIntervalRef.current = intervalId;
 
     return () => {
-      if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
-      if (noFaceTimerRef.current) clearTimeout(noFaceTimerRef.current);
+      clearInterval(intervalId);
     };
   }, [status, enabled, logViolation]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
+      const stream = streamRef.current;
+      const detectionInterval = detectionIntervalRef.current;
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
       }
-      if (detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
+      if (detectionInterval) clearInterval(detectionInterval);
     };
   }, []);
 

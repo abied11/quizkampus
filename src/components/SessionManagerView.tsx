@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import {
   dbSaveSession, dbDeleteSession,
-  dbBroadcastSessionNotification
+  dbBroadcastSessionNotification, defaultSessionSettings,
 } from '../dbService';
-import type { QuizSession, ActivityLog } from '../dbService';
+import type { QuizSession, ActivityLog, SessionMode } from '../dbService';
 import {
   Plus, Trash2, Edit2, X, Calendar, Clock, Lock, Unlock,
-  Shield, Copy, CheckCircle, AlertTriangle, Users, BookOpen, Key
+  Shield, Copy, CheckCircle, AlertTriangle, Users, BookOpen, Key, Radio, Monitor,
 } from 'lucide-react';
-import { useAppContext } from '../AppContext';
+import { useAppContext } from '../hooks/useAppContext';
+import { LiveHostPanel } from './LiveHostPanel';
+import { QRJoinCard } from './QRJoinCard';
 
-export const SessionManagerView: React.FC = () => {
+export const SessionManagerView: React.FC<{ user?: import('../dbService').User }> = ({ user }) => {
   const {
     sessions,
     questions: allQuestions,
@@ -38,6 +40,14 @@ export const SessionManagerView: React.FC = () => {
   const [accessCode, setAccessCode] = useState('');
   const [selectedQuestions, setSelectedQuestions] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [sessionMode, setSessionMode] = useState<SessionMode>('exam');
+  const [proctorEnabled, setProctorEnabled] = useState(true);
+  const [showExplanationMode, setShowExplanationMode] = useState<'never' | 'after_each' | 'after_submit'>('after_submit');
+  const [speedBonusEnabled, setSpeedBonusEnabled] = useState(false);
+  const [adaptiveEnabled, setAdaptiveEnabled] = useState(false);
+  const [teamsEnabled, setTeamsEnabled] = useState(false);
+  const [liveHostSession, setLiveHostSession] = useState<QuizSession | null>(null);
+  const [showQRSession, setShowQRSession] = useState<QuizSession | null>(null);
 
   const generateAccessCode = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -62,6 +72,12 @@ export const SessionManagerView: React.FC = () => {
     setPerQuestionSeconds(60);
     generateAccessCode();
     setSelectedQuestions([]);
+    setSessionMode('exam');
+    setProctorEnabled(true);
+    setShowExplanationMode('after_submit');
+    setSpeedBonusEnabled(false);
+    setAdaptiveEnabled(false);
+    setTeamsEnabled(false);
     setShowForm(true);
   };
 
@@ -79,6 +95,12 @@ export const SessionManagerView: React.FC = () => {
     setPerQuestionSeconds(s.perQuestionSeconds);
     setAccessCode(s.accessCode);
     setSelectedQuestions([...s.questions]);
+    setSessionMode(s.sessionMode ?? 'exam');
+    setProctorEnabled(s.proctorEnabled ?? true);
+    setShowExplanationMode(s.showExplanationMode ?? 'after_submit');
+    setSpeedBonusEnabled(s.speedBonusEnabled ?? false);
+    setAdaptiveEnabled(s.adaptiveEnabled ?? false);
+    setTeamsEnabled(s.teamsEnabled ?? false);
     setShowForm(true);
   };
 
@@ -100,18 +122,26 @@ export const SessionManagerView: React.FC = () => {
 
     setIsSaving(true);
     try {
+      const modeDefaults = defaultSessionSettings(sessionMode);
       const saved = await dbSaveSession({
         id: editingId,
         title, subject,
         startTime: new Date(startTime).toISOString(),
         endTime: new Date(endTime).toISOString(),
         durationMinutes,
-        attemptLimit,
+        attemptLimit: sessionMode === 'practice' ? 0 : attemptLimit,
         shuffleQuestions, shuffleOptions,
         timerType, perQuestionSeconds,
         accessCode: accessCode.toUpperCase(),
         isClosed: false,
         questions: selectedQuestions,
+        ...modeDefaults,
+        sessionMode,
+        proctorEnabled: sessionMode === 'exam' ? proctorEnabled : false,
+        showExplanationMode: sessionMode === 'practice' ? 'after_each' : showExplanationMode,
+        speedBonusEnabled: sessionMode === 'live' ? true : speedBonusEnabled,
+        adaptiveEnabled,
+        teamsEnabled,
       });
       // Broadcast notification to all mahasiswa when new session is created
       if (!editingId) {
@@ -211,6 +241,9 @@ export const SessionManagerView: React.FC = () => {
                       <span className="bg-uir-green-dark/40 text-uir-green-muted px-2.5 py-1 rounded-full text-xs font-medium border border-uir-green-medium/20">
                         {session.questions.length} Soal
                       </span>
+                      <span className="bg-indigo-950/40 text-indigo-300 px-2.5 py-1 rounded-full text-xs font-medium border border-indigo-500/20 uppercase">
+                        {session.sessionMode ?? 'exam'}
+                      </span>
                     </div>
 
                     <h3 className="text-lg font-bold text-white">{session.title}</h3>
@@ -268,7 +301,21 @@ export const SessionManagerView: React.FC = () => {
                   </div>
 
                   {/* Right: Actions */}
-                  <div className="flex lg:flex-col gap-2 items-start">
+                  <div className="flex lg:flex-col gap-2 items-start flex-wrap">
+                    {(session.sessionMode === 'live' || session.sessionMode === 'poll') && (
+                      <button
+                        onClick={() => setLiveHostSession(session)}
+                        className="px-3 py-2 rounded-xl border border-red-500/30 bg-red-950/20 text-red-300 text-xs font-semibold flex items-center gap-1.5"
+                      >
+                        <Radio className="h-3.5 w-3.5" /> Host Live
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setShowQRSession(session)}
+                      className="px-3 py-2 rounded-xl border border-uir-green-medium/30 bg-uir-green-dark/20 text-uir-green-muted text-xs font-semibold flex items-center gap-1.5"
+                    >
+                      <Monitor className="h-3.5 w-3.5" /> QR Join
+                    </button>
                     <button
                       onClick={() => toggleClose(session)}
                       className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all ${
@@ -335,6 +382,52 @@ export const SessionManagerView: React.FC = () => {
                     </button>
                   </div>
                 </div>
+              </div>
+
+              {/* Session Mode */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Mode Sesi</label>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  {([
+                    ['exam', 'Ujian'],
+                    ['live', 'Live'],
+                    ['homework', 'PR/Tugas'],
+                    ['practice', 'Latihan'],
+                    ['poll', 'Poll'],
+                  ] as const).map(([mode, label]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setSessionMode(mode)}
+                      className={`py-2 rounded-xl border text-xs font-semibold transition-all ${
+                        sessionMode === mode
+                          ? 'bg-uir-green-medium/20 border-uir-green-medium text-uir-green-muted'
+                          : 'border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                  <input type="checkbox" checked={proctorEnabled} onChange={e => setProctorEnabled(e.target.checked)} disabled={sessionMode !== 'exam'} />
+                  Proctoring
+                </label>
+                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                  <input type="checkbox" checked={speedBonusEnabled} onChange={e => setSpeedBonusEnabled(e.target.checked)} />
+                  Bonus Kecepatan
+                </label>
+                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                  <input type="checkbox" checked={adaptiveEnabled} onChange={e => setAdaptiveEnabled(e.target.checked)} />
+                  Adaptive Quiz
+                </label>
+                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                  <input type="checkbox" checked={teamsEnabled} onChange={e => setTeamsEnabled(e.target.checked)} />
+                  Mode Tim
+                </label>
               </div>
 
               {/* Time */}
@@ -454,6 +547,24 @@ export const SessionManagerView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {liveHostSession && (
+        <LiveHostPanel
+          session={liveHostSession}
+          user={user ?? users.find(u => u.role === 'dosen') ?? users[0]}
+          onClose={() => setLiveHostSession(null)}
+        />
+      )}
+
+      {showQRSession && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowQRSession(null)}>
+          <div className="glass rounded-3xl p-6 border border-slate-800" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-white mb-4 text-center">QR Code Join — {showQRSession.title}</h3>
+            <QRJoinCard session={showQRSession} />
+            <button onClick={() => setShowQRSession(null)} className="w-full mt-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-sm">Tutup</button>
           </div>
         </div>
       )}

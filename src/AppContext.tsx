@@ -1,10 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useCallback } from 'react';
 import {
   dbGetUsers, dbGetQuestions, dbGetSessions, dbGetAttempts, dbGetLogs, dbGetNotifications,
 } from './dbService';
 import type {
   User, Question, QuizSession, Attempt, ActivityLog, Notification,
 } from './dbService';
+import { supabase } from './supabaseClient';
 
 interface AppContextType {
   // Data
@@ -28,11 +29,7 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | null>(null);
 
-export const useAppContext = (): AppContextType => {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error('useAppContext must be used within AppProvider');
-  return ctx;
-};
+export { AppContext };
 
 interface AppProviderProps {
   children: React.ReactNode;
@@ -82,6 +79,20 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
   // Initial load
   useEffect(() => { refreshAll(); }, [refreshAll]);
+
+  // Realtime updates for live mode & monitor
+  useEffect(() => {
+    const channel = supabase
+      .channel('quiz-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_sessions' }, () => {
+        refreshSessions();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attempts' }, () => {
+        refreshAttempts();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [refreshSessions, refreshAttempts]);
 
   return (
     <AppContext.Provider value={{

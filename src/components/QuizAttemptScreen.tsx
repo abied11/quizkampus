@@ -9,7 +9,13 @@ import {
   Send, Maximize, CornerUpLeft, X, Link2
 } from 'lucide-react';
 import { WebcamProctor } from './WebcamProctor';
-import { useAppContext } from '../AppContext';
+import { LiveParticipantView } from './LiveParticipantView';
+import { PodiumView } from './PodiumView';
+import { buildPodiumFromAttempts } from '../utils/scoring';
+import { QRJoinHint } from './QRJoinCard';
+import { useAppContext } from '../hooks/useAppContext';
+import { isAnswerCorrect } from '../utils/scoring';
+import { playCorrectSound, playWrongSound, playFinishSound, playTickSound } from '../utils/sounds';
 
 // ─── Matching Question Sub-Component (extracted to respect Rules of Hooks) ────
 interface MatchingQuestionProps {
@@ -130,7 +136,7 @@ interface QuizAttemptScreenProps {
   onBack: () => void;
 }
 
-type QuizPhase = 'lobby' | 'in_progress' | 'finished';
+type QuizPhase = 'lobby' | 'in_progress' | 'live' | 'finished';
 
 export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBack }) => {
   const {
@@ -142,14 +148,21 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
   } = useAppContext();
 
   const [phase, setPhase] = useState<QuizPhase>('lobby');
-  const [accessCode, setAccessCode] = useState('');
+  const [accessCode, setAccessCode] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return (params.get('code') || '').toUpperCase();
+  });
   const [lobbyError, setLobbyError] = useState('');
+  const [teamName, setTeamName] = useState('');
 
   const [session, setSession] = useState<QuizSession | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answersMeta, setAnswersMeta] = useState<Record<string, { answeredAt: string; timeSpentMs: number }>>({});
   const [currentIdx, setCurrentIdx] = useState(0);
+  const [feedback, setFeedback] = useState<{ correct: boolean; explanation: string } | null>(null);
+  const questionStartRef = useRef<number>(Date.now());
 
   // Timer states
   const [timeLeft, setTimeLeft] = useState<number>(0); // in seconds
@@ -183,7 +196,7 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
   }, [attempt, user, refreshLogs]);
 
   useEffect(() => {
-    if (phase !== 'in_progress') return;
+    if (phase !== 'in_progress' || !session?.proctorEnabled) return;
 
     const onVisChange = () => {
       if (document.hidden) logViolation('tab_switch', 'Mahasiswa berpindah/menutup tab browser');
@@ -237,7 +250,22 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
       document.removeEventListener('mouseleave', onMouseLeave);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [phase, logViolation]);
+  }, [phase, logViolation, session?.proctorEnabled]);
+
+  const handleSubmit = useCallback(async () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (!attempt) return;
+    try {
+      const final = await dbSubmitAttempt(attempt.id, sessions, allQuestionsFromDB, attempts);
+      setFinalAttempt(final);
+      playFinishSound();
+      if (document.fullscreenElement) document.exitFullscreen();
+      setPhase('finished');
+      await refreshAttempts();
+    } catch (err) {
+      console.error(err);
+    }
+  }, [attempt, sessions, allQuestionsFromDB, attempts, refreshAttempts]);
 
   // ─── Timer ───────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -255,6 +283,7 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
       setTimeLeft(prev => {
         if (prev <= 1) {
           clearInterval(timerRef.current!);
+          playTickSound();
           if (session.timerType === 'total_session') {
             handleSubmit();
           } else {
@@ -276,13 +305,15 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
     }, 1000);
 
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [phase, session, questions.length]);
+  }, [phase, session, questions.length, handleSubmit]);
 
   // Reset per-question timer on question change
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (phase !== 'in_progress' || !session || session.timerType !== 'per_question') return;
     setTimeLeft(session.perQuestionSeconds);
+    questionStartRef.current = Date.now();
+    setFeedback(null);
   }, [currentIdx, phase, session]);
 
   // ─── Lobby: Join Quiz ─────────────────────────────────────────────────────
@@ -295,8 +326,9 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
     if (!found) { setLobbyError('Kode akses tidak valid. Periksa kembali kode dari dosen Anda.'); return; }
     if (found.isClosed) { setLobbyError('Sesi kuis ini telah ditutup oleh dosen.'); return; }
     const now = new Date();
-    if (now < new Date(found.startTime)) { setLobbyError('Sesi kuis ini belum dimulai. Silakan tunggu.'); return; }
-    if (now > new Date(found.endTime)) { setLobbyError('Sesi kuis ini telah berakhir.'); return; }
+    if (now < new Date(found.startTime) && found.sessionMode === 'exam') { setLobbyError('Sesi kuis ini belum dimulai. Silakan tunggu.'); return; }
+    if (now > new Date(found.endTime) && found.sessionMode === 'exam') { setLobbyError('Sesi kuis ini telah berakhir.'); return; }
+    if (found.teamsEnabled && !teamName.trim()) { setLobbyError('Masukkan nama tim terlebih dahulu.'); return; }
 
     let sessionQ = found.questions.map(qId => allQuestionsFromDB.find(q => q.id === qId)!).filter(Boolean);
 
@@ -315,17 +347,26 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
     }
 
     try {
-      const newAttempt = await dbStartAttempt(found.id, user.id, user.name, sessions, attempts);
+      const newAttempt = await dbStartAttempt(found.id, user.id, user.name, sessions, attempts, {
+        teamName: found.teamsEnabled ? teamName.trim() : undefined,
+      });
       setSession(found);
       setQuestions(sessionQ);
       setAttempt(newAttempt);
       setAnswers({});
+      setAnswersMeta({});
       setCurrentIdx(0);
       setViolations([]);
-      setPhase('in_progress');
+      questionStartRef.current = Date.now();
+
+      if (found.sessionMode === 'live' || found.sessionMode === 'poll') {
+        setPhase('live');
+      } else {
+        setPhase('in_progress');
+      }
       await refreshAttempts();
-    } catch (err: any) {
-      setLobbyError(err.message || 'Gagal memulai kuis.');
+    } catch (err: unknown) {
+      setLobbyError(err instanceof Error ? err.message : 'Gagal memulai kuis.');
     }
   };
 
@@ -335,11 +376,28 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
 
   // ─── In-Progress: Answer & Navigate ──────────────────────────────────────
   const handleAnswer = async (qId: string, value: string) => {
+    const q = questions.find(item => item.id === qId);
+    const timeSpentMs = Date.now() - questionStartRef.current;
     const newAnswers = { ...answers, [qId]: value };
+    const newMeta = {
+      ...answersMeta,
+      [qId]: { answeredAt: new Date().toISOString(), timeSpentMs },
+    };
     setAnswers(newAnswers);
+    setAnswersMeta(newMeta);
+
+    if (q && session) {
+      const correct = session.sessionMode === 'poll' ? true : isAnswerCorrect(q, value);
+      if (session.showExplanationMode === 'after_each' || session.sessionMode === 'practice') {
+        setFeedback({ correct, explanation: q.explanation || (correct ? 'Benar!' : `Jawaban: ${q.correctAnswer}`) });
+        if (correct) playCorrectSound(); else playWrongSound();
+      } else if (correct) playCorrectSound();
+      else playWrongSound();
+    }
+
     if (attempt) {
       try {
-        await dbSaveAttemptAnswers(attempt.id, newAnswers);
+        await dbSaveAttemptAnswers(attempt.id, newAnswers, newMeta);
         await refreshAttempts();
       } catch (err) {
         console.error('Gagal menyimpan jawaban:', err);
@@ -347,29 +405,16 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
     }
   };
 
-  const handleSubmit = useCallback(async () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (!attempt) return;
-    try {
-      const final = await dbSubmitAttempt(attempt.id, sessions, allQuestionsFromDB, attempts);
-      setFinalAttempt(final);
-      if (document.fullscreenElement) document.exitFullscreen();
-      setPhase('finished');
-      await refreshAttempts();
-    } catch (err) {
-      console.error(err);
-    }
-  }, [attempt, sessions, allQuestionsFromDB, attempts, refreshAttempts]);
-
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   };
 
+  const perQuestionLimit = session?.perQuestionSeconds ?? 0;
   const timeWarning = session?.timerType === 'total_session'
     ? timeLeft < 120
-    : timeLeft < session?.perQuestionSeconds! * 0.3;
+    : timeLeft < perQuestionLimit * 0.3;
 
   // ─── Phase: Lobby ─────────────────────────────────────────────────────────
   if (phase === 'lobby') {
@@ -401,10 +446,21 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
                 <AlertTriangle className="h-4 w-4 shrink-0" />{lobbyError}
               </div>
             )}
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Nama Tim (opsional)</label>
+              <input
+                type="text"
+                placeholder="Contoh: Tim Alpha"
+                value={teamName}
+                onChange={e => setTeamName(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl glass-input text-sm flex items-center gap-2"
+              />
+            </div>
             <div className="p-3 bg-uir-green-darker/20 border border-uir-green-medium/10 rounded-xl text-xs text-uir-green-muted flex items-center gap-2">
               <Maximize className="h-4 w-4 shrink-0" />
-              Kuis akan berjalan dalam mode <strong>layar penuh</strong>. Keluar layar penuh akan dicatat sebagai pelanggaran.
+              Mode ujian resmi menggunakan layar penuh & proctoring. Mode latihan/PR lebih fleksibel.
             </div>
+            <QRJoinHint />
             <button type="submit" className="w-full py-3 bg-uir-green-medium hover:bg-uir-green-dark text-white font-semibold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-uir-green-dark/25 transition-all active:scale-[0.98]">
               <ChevronRight className="h-5 w-5" /> Masuk & Mulai Kuis
             </button>
@@ -435,6 +491,22 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
           </div>
         )}
       </div>
+    );
+  }
+
+  // ─── Phase: Live (Kahoot-style) ───────────────────────────────────────────
+  if (phase === 'live' && session && attempt) {
+    return (
+      <LiveParticipantView
+        session={session}
+        questions={questions}
+        attempt={attempt}
+        user={user}
+        onFinish={(final) => {
+          setFinalAttempt(final);
+          setPhase('finished');
+        }}
+      />
     );
   }
 
@@ -540,6 +612,22 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
               </p>
             </div>
 
+            {/* Feedback after answer */}
+            {feedback && (
+              <div className={`p-4 rounded-xl border mb-4 ${feedback.correct ? 'bg-emerald-950/30 border-emerald-500/30' : 'bg-red-950/30 border-red-500/30'}`}>
+                <p className={`text-sm font-bold mb-1 ${feedback.correct ? 'text-emerald-300' : 'text-red-300'}`}>
+                  {feedback.correct ? '✓ Benar!' : '✗ Salah'}
+                </p>
+                <p className="text-xs text-slate-300">{feedback.explanation}</p>
+                <button
+                  onClick={() => { setFeedback(null); if (currentIdx + 1 < questions.length) setCurrentIdx(i => i + 1); }}
+                  className="mt-3 px-4 py-1.5 rounded-lg bg-slate-800 text-xs text-white"
+                >
+                  Lanjut →
+                </button>
+              </div>
+            )}
+
             {/* Answer Options */}
             <div className="space-y-3 flex-1">
               {currentQuestion.type === 'multiple_choice' && currentQuestion.options?.map((opt, idx) => {
@@ -637,7 +725,7 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
         </div>
 
         {/* Webcam Proctor – picture-in-picture overlay */}
-        {attempt && (
+        {attempt && session.proctorEnabled && (
           <WebcamProctor
             attempt={attempt}
             user={user}
@@ -722,6 +810,24 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
               <div className="text-2xl font-bold text-red-400">{finalAttempt.totalQuestions - finalAttempt.correctCount}</div>
               <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">Salah</div>
             </div>
+            {finalAttempt.bonusPoints > 0 && (
+              <>
+                <div className="w-px bg-slate-700" />
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-amber-400">+{finalAttempt.bonusPoints}</div>
+                  <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">Bonus</div>
+                </div>
+              </>
+            )}
+            {finalAttempt.bonusPoints > 0 && (
+              <>
+                <div className="w-px bg-slate-700" />
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-amber-400">+{finalAttempt.bonusPoints}</div>
+                  <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">Bonus</div>
+                </div>
+              </>
+            )}
             {violations.length > 0 && (
               <>
                 <div className="w-px bg-slate-700" />
@@ -782,6 +888,15 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
             </div>
           </div>
         )}
+
+        <div className="glass rounded-2xl p-6 border border-slate-800">
+          <PodiumView
+            entries={buildPodiumFromAttempts(
+              attempts.filter(a => a.quizSessionId === finalAttempt.quizSessionId && a.status === 'completed')
+            )}
+            title="Podium Sesi Ini"
+          />
+        </div>
 
         <button onClick={onBack} className="w-full py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2 transition-all">
           <CornerUpLeft className="h-4 w-4" /> Kembali ke Dashboard

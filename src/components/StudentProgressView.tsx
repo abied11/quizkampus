@@ -4,7 +4,8 @@ import {
   TrendingUp, TrendingDown, CheckCircle, XCircle, Clock,
   Shield, Trophy, AlertTriangle, BookOpen, BarChart2
 } from 'lucide-react';
-import { useAppContext } from '../AppContext';
+import { useAppContext } from '../hooks/useAppContext';
+import { BADGE_DEFINITIONS } from '../utils/scoring';
 
 interface StudentProgressViewProps {
   user: User;
@@ -78,7 +79,30 @@ export const StudentProgressView: React.FC<StudentProgressViewProps> = ({ user }
       {/* Header */}
       <div className="animate-fade-in-up">
         <h2 className="text-2xl font-bold text-white">Progres Saya</h2>
-        <p className="text-slate-400 text-sm mt-1">Pantau perkembangan nilai dan riwayat kuis Anda.</p>
+        <p className="text-slate-400 text-sm mt-1">Pantau perkembangan nilai, XP, dan badge Anda.</p>
+      </div>
+
+      {/* XP & Badges */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="glass rounded-2xl p-5 border border-slate-800">
+          <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Total XP</p>
+          <p className="text-4xl font-black text-uir-yellow-gold">{user.xp ?? 0}</p>
+          <div className="mt-3 h-2 bg-slate-800 rounded-full overflow-hidden">
+            <div className="h-full bg-gradient-to-r from-uir-green-medium to-uir-yellow-gold rounded-full" style={{ width: `${Math.min(100, (user.xp ?? 0) % 100)}%` }} />
+          </div>
+        </div>
+        <div className="glass rounded-2xl p-5 border border-slate-800">
+          <p className="text-xs text-slate-400 uppercase tracking-wider mb-3">Badge</p>
+          <div className="flex flex-wrap gap-2">
+            {(user.badges ?? []).length === 0 ? (
+              <p className="text-xs text-slate-500">Belum ada badge. Selesaikan kuis untuk mendapatkan!</p>
+            ) : (user.badges ?? []).map(b => (
+              <span key={b} className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200" title={BADGE_DEFINITIONS[b]?.desc}>
+                {BADGE_DEFINITIONS[b]?.icon ?? '🏅'} {BADGE_DEFINITIONS[b]?.label ?? b}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Stats Cards */}

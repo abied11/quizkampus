@@ -5,7 +5,8 @@ import { AuthScreen } from './components/AuthScreen';
 import { DosenDashboard } from './components/DosenDashboard';
 import { MahasiswaDashboard } from './components/MahasiswaDashboard';
 
-import { AppProvider, useAppContext } from './AppContext';
+import { AppProvider } from './AppContext';
+import { useAppContext } from './hooks/useAppContext';
 
 initDB();
 
@@ -25,9 +26,17 @@ function AppContent() {
     refreshAll();
   };
 
+  const handleUserUpdated = (updated: User) => {
+    dbSetCurrentUser(updated);
+    setUser(updated);
+    refreshAll();
+  };
+
   if (!user) return <AuthScreen onLoginSuccess={handleLogin} />;
-  if (user.role === 'dosen') return <DosenDashboard user={user} onLogout={handleLogout} />;
-  return <MahasiswaDashboard user={user} onLogout={handleLogout} />;
+  if (user.role === 'dosen') {
+    return <DosenDashboard user={user} onLogout={handleLogout} onUserUpdated={handleUserUpdated} />;
+  }
+  return <MahasiswaDashboard user={user} onLogout={handleLogout} onUserUpdated={handleUserUpdated} />;
 }
 
 function App() {

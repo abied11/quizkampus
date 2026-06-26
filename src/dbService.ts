@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { computeSpeedBonus, isAnswerCorrect, xpForAttempt } from './utils/scoring';
 
 // ── Interfaces (unchanged) ────────────────────────────────────────────────────
 export interface User {
@@ -7,13 +8,23 @@ export interface User {
   email: string;
   role: 'dosen' | 'mahasiswa';
   class: string;
+  xp?: number;
+  badges?: string[];
+  profilePhotoUrl?: string;
+  bio?: string;
+  phone?: string;
 }
+
+export type SessionMode = 'exam' | 'live' | 'homework' | 'practice' | 'poll';
+export type LivePhase = 'waiting' | 'question' | 'reveal' | 'leaderboard' | 'finished';
+export type ExplanationMode = 'never' | 'after_each' | 'after_submit';
+export type AttemptType = 'exam' | 'practice' | 'live' | 'homework' | 'poll';
 
 export interface Question {
   id: string;
   subject: string;
   topic: string;
-  type: 'multiple_choice' | 'essay' | 'boolean' | 'matching';
+  type: 'multiple_choice' | 'essay' | 'boolean' | 'matching' | 'poll';
   text: string;
   options?: string[];
   correctAnswer: string;
@@ -36,6 +47,15 @@ export interface QuizSession {
   accessCode: string;
   isClosed: boolean;
   questions: string[];
+  sessionMode: SessionMode;
+  livePhase: LivePhase;
+  currentQuestionIndex: number;
+  proctorEnabled: boolean;
+  showExplanationMode: ExplanationMode;
+  speedBonusEnabled: boolean;
+  adaptiveEnabled: boolean;
+  teamsEnabled: boolean;
+  hostId?: string;
 }
 
 export interface Attempt {
@@ -50,6 +70,12 @@ export interface Attempt {
   totalQuestions: number;
   correctCount: number;
   status: 'in_progress' | 'completed';
+  attemptType: AttemptType;
+  bonusPoints: number;
+  answersMeta: Record<string, { answeredAt: string; timeSpentMs: number }>;
+  teamId?: string;
+  teamName?: string;
+  adaptivePath: string[];
 }
 
 export interface ActivityLog {
@@ -106,6 +132,10 @@ const genId = (prefix: string) => prefix + Math.random().toString(36).substr(2, 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rowToUser = (r: any): User => ({
   id: r.id, name: r.name, email: r.email, role: r.role, class: r.user_class ?? '',
+  xp: r.xp ?? 0, badges: r.badges ?? [],
+  profilePhotoUrl: r.profile_photo_url ?? undefined,
+  bio: r.bio ?? '',
+  phone: r.phone ?? '',
 });
 const userToRow = (u: User) => ({
   id: u.id, name: u.name, email: u.email, role: u.role, user_class: u.class,
@@ -132,6 +162,15 @@ const rowToSession = (r: any): QuizSession => ({
   timerType: r.timer_type, perQuestionSeconds: r.per_question_seconds,
   accessCode: r.access_code, isClosed: r.is_closed,
   questions: r.questions ?? [],
+  sessionMode: r.session_mode ?? 'exam',
+  livePhase: r.live_phase ?? 'waiting',
+  currentQuestionIndex: r.current_question_index ?? 0,
+  proctorEnabled: r.proctor_enabled ?? true,
+  showExplanationMode: r.show_explanation_mode ?? 'after_submit',
+  speedBonusEnabled: r.speed_bonus_enabled ?? false,
+  adaptiveEnabled: r.adaptive_enabled ?? false,
+  teamsEnabled: r.teams_enabled ?? false,
+  hostId: r.host_id ?? undefined,
 });
 const sessionToRow = (s: QuizSession) => ({
   id: s.id, title: s.title, subject: s.subject,
@@ -141,6 +180,15 @@ const sessionToRow = (s: QuizSession) => ({
   timer_type: s.timerType, per_question_seconds: s.perQuestionSeconds,
   access_code: s.accessCode, is_closed: s.isClosed,
   questions: s.questions,
+  session_mode: s.sessionMode,
+  live_phase: s.livePhase,
+  current_question_index: s.currentQuestionIndex,
+  proctor_enabled: s.proctorEnabled,
+  show_explanation_mode: s.showExplanationMode,
+  speed_bonus_enabled: s.speedBonusEnabled,
+  adaptive_enabled: s.adaptiveEnabled,
+  teams_enabled: s.teamsEnabled,
+  host_id: s.hostId ?? null,
 });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -151,6 +199,12 @@ const rowToAttempt = (r: any): Attempt => ({
   answers: r.answers ?? {}, score: r.score,
   totalQuestions: r.total_questions, correctCount: r.correct_count,
   status: r.status,
+  attemptType: r.attempt_type ?? 'exam',
+  bonusPoints: r.bonus_points ?? 0,
+  answersMeta: r.answers_meta ?? {},
+  teamId: r.team_id ?? undefined,
+  teamName: r.team_name ?? undefined,
+  adaptivePath: r.adaptive_path ?? [],
 });
 const attemptToRow = (a: Attempt) => ({
   id: a.id, quiz_session_id: a.quizSessionId,
@@ -159,6 +213,12 @@ const attemptToRow = (a: Attempt) => ({
   answers: a.answers, score: a.score,
   total_questions: a.totalQuestions, correct_count: a.correctCount,
   status: a.status,
+  attempt_type: a.attemptType,
+  bonus_points: a.bonusPoints,
+  answers_meta: a.answersMeta,
+  team_id: a.teamId ?? null,
+  team_name: a.teamName ?? null,
+  adaptive_path: a.adaptivePath,
 });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -176,6 +236,28 @@ const rowToNotification = (r: any): Notification => ({
   timestamp: r.timestamp,
 });
 
+// ── Password hashing (SHA-256 with email salt) ───────────────────────────────
+const toAuthError = (err: unknown, fallback: string): Error => {
+  if (err instanceof Error) return err;
+  if (err && typeof err === 'object' && 'message' in err) {
+    const msg = String((err as { message: unknown }).message);
+    const code = 'code' in err ? String((err as { code: unknown }).code) : '';
+    if (code === '42703' || msg.includes('password_hash')) {
+      return new Error(
+        'Database belum diupdate. Buka Supabase Dashboard → SQL Editor, lalu jalankan isi file supabase_migration_password.sql.',
+      );
+    }
+    return new Error(msg || fallback);
+  }
+  return new Error(fallback);
+};
+
+const hashPassword = async (email: string, password: string): Promise<string> => {
+  const data = new TextEncoder().encode(`${email.trim().toLowerCase()}:${password}`);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+};
+
 // ── Current user (still in localStorage for session persistence) ─────────────
 const CURRENT_USER_KEY = 'wqk_current_user';
 export const dbGetCurrentUser = (): User | null => {
@@ -189,24 +271,120 @@ export const dbSetCurrentUser = (user: User | null): void => {
 
 // ── USER OPERATIONS ──────────────────────────────────────────────────────────
 export const dbGetUsers = async (): Promise<User[]> => {
-  const { data, error } = await supabase.from('users').select('*');
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, name, email, role, user_class, xp, badges, profile_photo_url, bio, phone');
   if (error) throw error;
   return (data ?? []).map(rowToUser);
 };
 
-export const dbRegisterUser = async (name: string, email: string, role: 'dosen' | 'mahasiswa', className: string): Promise<User> => {
-  // Check if user with this email already exists
-  const { data: existing } = await supabase
+export const dbGetUserById = async (userId: string): Promise<User | null> => {
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, name, email, role, user_class, xp, badges, profile_photo_url, bio, phone')
+    .eq('id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? rowToUser(data) : null;
+};
+
+export const dbUpdateUserProfile = async (
+  userId: string,
+  patch: { name: string; class: string; bio?: string; phone?: string },
+): Promise<User> => {
+  const { data, error } = await supabase
+    .from('users')
+    .update({
+      name: patch.name,
+      user_class: patch.class,
+      bio: patch.bio ?? '',
+      phone: patch.phone ?? '',
+    })
+    .eq('id', userId)
+    .select('id, name, email, role, user_class, xp, badges, profile_photo_url, bio, phone')
+    .single();
+  if (error) throw toAuthError(error, 'Gagal memperbarui profil.');
+  return rowToUser(data);
+};
+
+export const dbUploadProfilePhoto = async (userId: string, file: File): Promise<string> => {
+  const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+  const path = `${userId}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('avatars')
+    .upload(path, file, { upsert: true, contentType: file.type });
+
+  if (uploadError) {
+    if (uploadError.message.includes('Bucket not found')) {
+      throw new Error('Bucket foto belum dibuat. Jalankan supabase_migration_profile.sql di Supabase.');
+    }
+    throw new Error(uploadError.message);
+  }
+
+  const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path);
+  const publicUrl = `${urlData.publicUrl}?t=${Date.now()}`;
+
+  const { error: updateError } = await supabase
+    .from('users')
+    .update({ profile_photo_url: publicUrl })
+    .eq('id', userId);
+
+  if (updateError) throw toAuthError(updateError, 'Gagal menyimpan URL foto.');
+
+  return publicUrl;
+};
+
+export const dbLoginUser = async (email: string, password: string): Promise<User> => {
+  const normalizedEmail = email.trim().toLowerCase();
+  const { data, error } = await supabase
     .from('users')
     .select('*')
-    .ilike('email', email)
+    .ilike('email', normalizedEmail)
     .limit(1);
 
-  if (existing && existing.length > 0) return rowToUser(existing[0]);
+  if (error) throw toAuthError(error, 'Gagal masuk.');
+  if (!data || data.length === 0) throw new Error('Email atau password salah.');
 
-  const newUser: User = { id: genId('u_'), name, email, role, class: className };
-  const { error } = await supabase.from('users').insert(userToRow(newUser));
-  if (error) throw error;
+  const row = data[0];
+  if (!row.password_hash) throw new Error('Akun ini belum memiliki password. Silakan daftar ulang atau hubungi admin.');
+
+  const hash = await hashPassword(normalizedEmail, password);
+  if (row.password_hash !== hash) throw new Error('Email atau password salah.');
+
+  return rowToUser(row);
+};
+
+export const dbRegisterUser = async (
+  name: string,
+  email: string,
+  password: string,
+  role: 'dosen' | 'mahasiswa',
+  className: string,
+): Promise<User> => {
+  const normalizedEmail = email.trim().toLowerCase();
+
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .ilike('email', normalizedEmail)
+    .limit(1);
+
+  if (existing && existing.length > 0) {
+    throw new Error('Email sudah terdaftar. Silakan masuk dengan akun Anda.');
+  }
+
+  if (password.length < 6) {
+    throw new Error('Password minimal 6 karakter.');
+  }
+
+  const passwordHash = await hashPassword(normalizedEmail, password);
+  const newUser: User = { id: genId('u_'), name, email: normalizedEmail, role, class: className };
+  const { error } = await supabase.from('users').insert({
+    ...userToRow(newUser),
+    password_hash: passwordHash,
+  });
+  if (error) throw toAuthError(error, 'Gagal mendaftar.');
   return newUser;
 };
 
@@ -310,13 +488,24 @@ export const dbGetAttempts = async (): Promise<Attempt[]> => {
 
 export const dbStartAttempt = async (
   quizSessionId: string, studentId: string, studentName: string,
-  sessions: QuizSession[], attempts: Attempt[]
+  sessions: QuizSession[], attempts: Attempt[],
+  opts?: { teamName?: string; forceType?: AttemptType },
 ): Promise<Attempt> => {
   const session = sessions.find(s => s.id === quizSessionId);
   if (!session) throw new Error('Sesi kuis tidak ditemukan.');
 
-  const pastAttempts = attempts.filter(a => a.quizSessionId === quizSessionId && a.studentId === studentId);
-  if (session.attemptLimit > 0 && pastAttempts.length >= session.attemptLimit) {
+  const attemptType: AttemptType = opts?.forceType ?? (
+    session.sessionMode === 'practice' ? 'practice'
+    : session.sessionMode === 'live' ? 'live'
+    : session.sessionMode === 'homework' ? 'homework'
+    : session.sessionMode === 'poll' ? 'poll'
+    : 'exam'
+  );
+
+  const pastAttempts = attempts.filter(
+    a => a.quizSessionId === quizSessionId && a.studentId === studentId && a.attemptType !== 'practice',
+  );
+  if (session.attemptLimit > 0 && attemptType !== 'practice' && pastAttempts.length >= session.attemptLimit) {
     throw new Error(`Anda telah melampaui batas pengerjaan (${session.attemptLimit}x).`);
   }
 
@@ -326,20 +515,146 @@ export const dbStartAttempt = async (
     answers: {}, score: 0,
     totalQuestions: session.questions.length, correctCount: 0,
     status: 'in_progress',
+    attemptType,
+    bonusPoints: 0,
+    answersMeta: {},
+    teamName: opts?.teamName,
+    teamId: opts?.teamName ? `team_${opts.teamName.toLowerCase().replace(/\s+/g, '_')}` : undefined,
+    adaptivePath: [],
   };
 
   const { error } = await supabase.from('attempts').insert(attemptToRow(newAttempt));
-  if (error) throw error;
+  if (error) throw toAuthError(error, 'Gagal memulai kuis.');
   return newAttempt;
 };
 
-export const dbSaveAttemptAnswers = async (attemptId: string, answers: Record<string, string>): Promise<void> => {
-  const { error } = await supabase
-    .from('attempts')
-    .update({ answers })
-    .eq('id', attemptId);
+export const dbSaveAttemptAnswers = async (
+  attemptId: string,
+  answers: Record<string, string>,
+  answersMeta?: Record<string, { answeredAt: string; timeSpentMs: number }>,
+): Promise<void> => {
+  const payload: Record<string, unknown> = { answers, last_heartbeat: new Date().toISOString() };
+  if (answersMeta) payload.answers_meta = answersMeta;
+  const { error } = await supabase.from('attempts').update(payload).eq('id', attemptId);
   if (error) throw error;
 };
+
+export const dbUpdateLiveSession = async (
+  sessionId: string,
+  patch: Partial<Pick<QuizSession, 'livePhase' | 'currentQuestionIndex' | 'isClosed' | 'hostId'>>,
+): Promise<void> => {
+  const row: Record<string, unknown> = {};
+  if (patch.livePhase !== undefined) row.live_phase = patch.livePhase;
+  if (patch.currentQuestionIndex !== undefined) row.current_question_index = patch.currentQuestionIndex;
+  if (patch.isClosed !== undefined) row.is_closed = patch.isClosed;
+  if (patch.hostId !== undefined) row.host_id = patch.hostId;
+  const { error } = await supabase.from('quiz_sessions').update(row).eq('id', sessionId);
+  if (error) throw error;
+};
+
+export const dbGetPollResults = async (
+  sessionId: string,
+  questionId: string,
+  attempts: Attempt[],
+): Promise<{ option: string; count: number; pct: number }[]> => {
+  const sessionAttempts = attempts.filter(
+    a => a.quizSessionId === sessionId && a.status === 'completed',
+  );
+  const counts: Record<string, number> = {};
+  let total = 0;
+  sessionAttempts.forEach(a => {
+    const ans = a.answers[questionId];
+    if (ans) {
+      counts[ans] = (counts[ans] || 0) + 1;
+      total++;
+    }
+  });
+  return Object.entries(counts)
+    .map(([option, count]) => ({ option, count, pct: total ? Math.round((count / total) * 100) : 0 }))
+    .sort((a, b) => b.count - a.count);
+};
+
+export const dbAwardUserXP = async (
+  userId: string,
+  xpGain: number,
+  newBadges: string[],
+): Promise<void> => {
+  const { data } = await supabase.from('users').select('xp, badges').eq('id', userId).single();
+  if (!data) return;
+  const currentBadges: string[] = data.badges ?? [];
+  const mergedBadges = [...new Set([...currentBadges, ...newBadges])];
+  const { error } = await supabase.from('users').update({
+    xp: (data.xp ?? 0) + xpGain,
+    badges: mergedBadges,
+  }).eq('id', userId);
+  if (error) console.error('awardXP', error);
+};
+
+export const dbGetFlashcardDue = async (userId: string, questions: Question[]): Promise<Question[]> => {
+  const { data, error } = await supabase
+    .from('flashcard_progress')
+    .select('question_id, next_review')
+    .eq('user_id', userId);
+  if (error) return questions.slice(0, 20);
+  const dueIds = new Set(
+    (data ?? [])
+      .filter(r => new Date(r.next_review) <= new Date())
+      .map(r => r.question_id),
+  );
+  const due = questions.filter(q => dueIds.has(q.id));
+  return due.length > 0 ? due : questions.slice(0, 10);
+};
+
+export const dbUpdateFlashcardProgress = async (
+  userId: string,
+  questionId: string,
+  quality: 'easy' | 'hard' | 'again',
+): Promise<void> => {
+  const { data: existing } = await supabase
+    .from('flashcard_progress')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('question_id', questionId)
+    .maybeSingle();
+
+  const intervals = { again: 1, hard: 3, easy: 7 };
+  const days = intervals[quality];
+  const nextReview = new Date();
+  nextReview.setDate(nextReview.getDate() + days);
+
+  if (existing) {
+    await supabase.from('flashcard_progress').update({
+      interval_days: days,
+      next_review: nextReview.toISOString(),
+      review_count: (existing.review_count ?? 0) + 1,
+    }).eq('id', existing.id);
+  } else {
+    await supabase.from('flashcard_progress').insert({
+      id: genId('fc_'),
+      user_id: userId,
+      question_id: questionId,
+      ease_factor: 2.5,
+      interval_days: days,
+      next_review: nextReview.toISOString(),
+      review_count: 1,
+    });
+  }
+};
+
+export const defaultSessionSettings = (mode: SessionMode = 'exam'): Pick<
+  QuizSession,
+  'sessionMode' | 'livePhase' | 'currentQuestionIndex' | 'proctorEnabled' |
+  'showExplanationMode' | 'speedBonusEnabled' | 'adaptiveEnabled' | 'teamsEnabled'
+> => ({
+  sessionMode: mode,
+  livePhase: 'waiting',
+  currentQuestionIndex: 0,
+  proctorEnabled: mode === 'exam',
+  showExplanationMode: mode === 'practice' ? 'after_each' : mode === 'poll' ? 'never' : 'after_submit',
+  speedBonusEnabled: mode === 'live',
+  adaptiveEnabled: false,
+  teamsEnabled: false,
+});
 
 export const dbSubmitAttempt = async (
   attemptId: string, sessions: QuizSession[], questions: Question[], attempts: Attempt[]
@@ -355,27 +670,22 @@ export const dbSubmitAttempt = async (
   session.questions.forEach(qId => {
     const q = questions.find(item => item.id === qId);
     if (!q) return;
-
-    if (q.type === 'matching') {
-      try {
-        const correctMap: Record<string, string> = JSON.parse(q.correctAnswer);
-        const studentMap: Record<string, string> = attempt.answers[qId] ? JSON.parse(attempt.answers[qId]) : {};
-        const pairCount = Object.keys(correctMap).length;
-        if (pairCount === 0) return;
-        let correctPairs = 0;
-        Object.entries(correctMap).forEach(([key, val]) => {
-          if ((studentMap[key] || '').trim().toLowerCase() === val.trim().toLowerCase()) correctPairs++;
-        });
-        if (correctPairs === pairCount) correctCount++;
-      } catch { /* invalid JSON */ }
-    } else {
-      const studentAns = (attempt.answers[qId] || '').trim().toLowerCase();
-      const correctAns = q.correctAnswer.trim().toLowerCase();
-      if (studentAns === correctAns) correctCount++;
+    if (session.sessionMode === 'poll') {
+      if (attempt.answers[qId]) correctCount++;
+      return;
     }
+    if (isAnswerCorrect(q, attempt.answers[qId] || '')) correctCount++;
   });
 
-  const finalScore = attempt.totalQuestions > 0 ? Math.round((correctCount / attempt.totalQuestions) * 100) : 0;
+  const bonusPoints = session.sessionMode === 'poll' ? 0
+    : computeSpeedBonus(session, attempt.answersMeta ?? {}, correctCount);
+
+  const baseScore = attempt.totalQuestions > 0
+    ? Math.round((correctCount / attempt.totalQuestions) * 100)
+    : session.sessionMode === 'poll' ? 100 : 0;
+  const finalScore = session.sessionMode === 'poll'
+    ? 100
+    : Math.min(100, baseScore + bonusPoints);
 
   const updatedAttempt: Attempt = {
     ...attempt,
@@ -383,6 +693,7 @@ export const dbSubmitAttempt = async (
     submitTime: new Date().toISOString(),
     correctCount,
     score: finalScore,
+    bonusPoints,
   };
 
   const { error } = await supabase.from('attempts')
@@ -391,9 +702,20 @@ export const dbSubmitAttempt = async (
       submit_time: updatedAttempt.submitTime,
       correct_count: correctCount,
       score: finalScore,
+      bonus_points: bonusPoints,
     })
     .eq('id', attemptId);
   if (error) throw error;
+
+  if (attempt.attemptType !== 'practice' && session.sessionMode !== 'poll') {
+    const violationCount = 0;
+    const xp = xpForAttempt(finalScore, bonusPoints, violationCount);
+    const badges: string[] = [];
+    if (finalScore === 100) badges.push('perfect_score');
+    if (bonusPoints >= 15) badges.push('speed_demon');
+    await dbAwardUserXP(attempt.studentId, xp, badges);
+  }
+
   return updatedAttempt;
 };
 

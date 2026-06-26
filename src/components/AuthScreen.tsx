@@ -1,31 +1,58 @@
 import React, { useState } from 'react';
-import { dbRegisterUser } from '../dbService';
-import type { User } from '../dbService';
-import { UserCheck, UserPlus, GraduationCap, Users, LogIn } from 'lucide-react';
-import { useAppContext } from '../AppContext';
+import { dbRegisterUser, dbLoginUser } from '../dbService';
+import { UserPlus, GraduationCap, Users, LogIn, Lock } from 'lucide-react';
 
 interface AuthScreenProps {
-  onLoginSuccess: (user: User) => void;
+  onLoginSuccess: (user: import('../dbService').User) => void;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
-  const { users, refreshUsers, loading } = useAppContext();
-  const [activeTab, setActiveTab] = useState<'quick' | 'register'>('quick');
+  const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [role, setRole] = useState<'dosen' | 'mahasiswa'>('mahasiswa');
   const [className, setClassName] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleQuickLogin = (user: User) => {
-    onLoginSuccess(user);
+  const switchTab = (tab: 'login' | 'register') => {
+    setActiveTab(tab);
+    setError('');
+    setSuccess('');
+    setPassword('');
+    setConfirmPassword('');
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+
+    if (!email || !password) {
+      setError('Email dan password wajib diisi.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const user = await dbLoginUser(email, password);
+      onLoginSuccess(user);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Terjadi kesalahan saat masuk.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
 
-    if (!name || !email || !className) {
+    if (!name || !email || !password || !confirmPassword || !className) {
       setError('Semua kolom wajib diisi.');
       return;
     }
@@ -35,12 +62,30 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       return;
     }
 
+    if (password.length < 6) {
+      setError('Password minimal 6 karakter.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('Konfirmasi password tidak cocok.');
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      const newUser = await dbRegisterUser(name, email, role, className);
-      await refreshUsers();
-      onLoginSuccess(newUser);
-    } catch (err: any) {
-      setError(err.message || 'Terjadi kesalahan saat mendaftar.');
+      await dbRegisterUser(name, email, password, role, className);
+      setName('');
+      setPassword('');
+      setConfirmPassword('');
+      setClassName('');
+      setRole('mahasiswa');
+      setActiveTab('login');
+      setSuccess('Pendaftaran berhasil! Silakan masuk dengan email dan password Anda.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Terjadi kesalahan saat mendaftar.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -78,18 +123,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           {/* Tabs */}
           <div className="flex p-1 bg-slate-950/80 rounded-2xl mb-6 border border-slate-900">
             <button
-              onClick={() => { setActiveTab('quick'); setError(''); }}
+              onClick={() => switchTab('login')}
               className={`flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 ${
-                activeTab === 'quick'
+                activeTab === 'login'
                   ? 'bg-uir-green-medium text-white shadow-md shadow-uir-green-medium/20'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <UserCheck className="h-4 w-4" />
-              Masuk Cepat
+              <LogIn className="h-4 w-4" />
+              Masuk
             </button>
             <button
-              onClick={() => { setActiveTab('register'); setError(''); }}
+              onClick={() => switchTab('register')}
               className={`flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 ${
                 activeTab === 'register'
                   ? 'bg-uir-green-medium text-white shadow-md shadow-uir-green-medium/20'
@@ -107,63 +152,55 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             </div>
           )}
 
-          {activeTab === 'quick' ? (
-            <div className="space-y-4">
-              <p className="text-slate-400 text-xs mb-3 text-center">
-                Pilih salah satu akun demo di bawah untuk masuk secara instan:
-              </p>
-              
-              <div className="space-y-3">
-                {loading ? (
-                  <div className="py-8 text-center text-slate-400 text-sm flex flex-col items-center gap-3">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-uir-green-medium"></div>
-                    <span className="animate-pulse">Menghubungkan ke database Supabase...</span>
-                  </div>
-                ) : users.length === 0 ? (
-                  <div className="py-8 text-center text-slate-400 text-sm">
-                    Tidak ada akun demo ditemukan. Silakan gunakan tab "Daftar Baru" untuk membuat akun pertama Anda.
-                  </div>
-                ) : (
-                  users.map((user, idx) => (
-                    <button
-                      key={user.id}
-                      onClick={() => handleQuickLogin(user)}
-                      className="w-full text-left p-4 rounded-2xl bg-slate-900/50 border border-slate-800/80 hover:border-uir-green-medium/50 hover:bg-slate-800/40 transition-all duration-200 flex items-center justify-between group hover-lift animate-slide-in-left"
-                      style={{ animationDelay: `${idx * 80}ms` }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2.5 rounded-xl transition-all group-hover:scale-110 ${
-                          user.role === 'dosen' 
-                            ? 'bg-uir-yellow-gold/10 text-uir-yellow-gold border border-uir-yellow-gold/20 group-hover:bg-uir-yellow-gold/20' 
-                            : 'bg-uir-green-medium/10 text-uir-green-muted border border-uir-green-medium/20 group-hover:bg-uir-green-medium/20'
-                        }`}>
-                          {user.role === 'dosen' ? <GraduationCap className="h-5 w-5" /> : <Users className="h-5 w-5" />}
-                        </div>
-                        <div>
-                          <h4 className="font-semibold text-slate-100 group-hover:text-uir-yellow-accent transition-colors">
-                            {user.name}
-                          </h4>
-                          <span className="text-xs text-slate-400 block mt-0.5">
-                            {user.email} • {user.class}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full ${
-                          user.role === 'dosen'
-                            ? 'bg-uir-yellow-dark/40 text-uir-yellow-gold border border-uir-yellow-gold/20'
-                            : 'bg-uir-green-dark/40 text-uir-green-muted border border-uir-green-medium/20'
-                        }`}>
-                          {user.role === 'dosen' ? 'Dosen' : 'Mhs'}
-                        </span>
-                        <LogIn className="h-4 w-4 text-slate-600 group-hover:text-uir-yellow-accent transition-colors" />
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
+          {success && (
+            <div className="mb-4 p-3 bg-uir-green-dark/40 border border-uir-green-medium/30 rounded-xl text-uir-green-muted text-xs">
+              {success}
             </div>
+          )}
+
+          {activeTab === 'login' ? (
+            <form onSubmit={handleLogin} className="space-y-4">
+              <p className="text-slate-400 text-xs mb-1 text-center">
+                Masuk dengan email dan password akun Anda
+              </p>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  placeholder="Contoh: budi@student.ac.id"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  className="w-full px-4 py-3 rounded-xl glass-input text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  placeholder="Masukkan password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  className="w-full px-4 py-3 rounded-xl glass-input text-sm"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full mt-2 py-3 bg-gradient-to-r from-uir-green-medium to-uir-green-dark hover:from-uir-green-bright hover:to-uir-green-medium disabled:opacity-60 text-white font-semibold rounded-xl shadow-lg shadow-uir-green-dark/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+              >
+                <LogIn className="h-4 w-4" />
+                {submitting ? 'Memproses...' : 'Masuk'}
+              </button>
+            </form>
           ) : (
             <form onSubmit={handleRegister} className="space-y-4">
               <div>
@@ -175,6 +212,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                   placeholder="Contoh: Budi Pratama"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  autoComplete="name"
                   className="w-full px-4 py-3 rounded-xl glass-input text-sm"
                 />
               </div>
@@ -188,6 +226,35 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                   placeholder="Contoh: budi@student.ac.id"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  className="w-full px-4 py-3 rounded-xl glass-input text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  placeholder="Minimal 6 karakter"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="new-password"
+                  className="w-full px-4 py-3 rounded-xl glass-input text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">
+                  Konfirmasi Password
+                </label>
+                <input
+                  type="password"
+                  placeholder="Ulangi password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  autoComplete="new-password"
                   className="w-full px-4 py-3 rounded-xl glass-input text-sm"
                 />
               </div>
@@ -239,11 +306,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
               <button
                 type="submit"
-                className="w-full mt-2 py-3 bg-gradient-to-r from-uir-green-medium to-uir-green-dark hover:from-uir-green-bright hover:to-uir-green-medium text-white font-semibold rounded-xl shadow-lg shadow-uir-green-dark/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                disabled={submitting}
+                className="w-full mt-2 py-3 bg-gradient-to-r from-uir-green-medium to-uir-green-dark hover:from-uir-green-bright hover:to-uir-green-medium disabled:opacity-60 text-white font-semibold rounded-xl shadow-lg shadow-uir-green-dark/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
               >
-                <LogIn className="h-4 w-4" />
-                Daftar & Masuk
+                <Lock className="h-4 w-4" />
+                {submitting ? 'Memproses...' : 'Daftar Akun'}
               </button>
+
+              <p className="text-slate-500 text-xs text-center">
+                Setelah daftar, Anda akan diarahkan ke halaman masuk
+              </p>
             </form>
           )}
         </div>
