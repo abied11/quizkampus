@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
-  dbUpdateLiveSession, dbGetPollResults,
+  dbUpdateLiveSession, dbGetPollResults, dbGetUsersByIds
 } from '../dbService';
 import type { QuizSession, Question, User } from '../dbService';
 import { QRJoinCard } from './QRJoinCard';
 import { PodiumView } from './PodiumView';
+import { UserAvatar } from './UserAvatar';
 import { buildPodiumFromAttempts } from '../utils/scoring';
 import { useAppContext } from '../hooks/useAppContext';
 import {
@@ -21,6 +22,7 @@ export const LiveHostPanel: React.FC<LiveHostPanelProps> = ({ session, user, onC
   const { questions, attempts, refreshSessions } = useAppContext();
   const [liveSession, setLiveSession] = useState(session);
   const [pollResults, setPollResults] = useState<{ option: string; count: number; pct: number }[]>([]);
+  const [usersMap, setUsersMap] = useState<Record<string, User>>({});
 
   const sessionQuestions = liveSession.questions
     .map(id => questions.find(q => q.id === id))
@@ -32,6 +34,17 @@ export const LiveHostPanel: React.FC<LiveHostPanelProps> = ({ session, user, onC
   useEffect(() => {
     setLiveSession(session);
   }, [session]);
+
+  // Load participant profiles
+  useEffect(() => {
+    const ids = [...new Set(liveAttempts.map(a => a.studentId))];
+    if (!ids.length) return;
+    dbGetUsersByIds(ids).then(users => {
+      const map: Record<string, User> = {};
+      users.forEach(u => { map[u.id] = u; });
+      setUsersMap(map);
+    }).catch(() => {});
+  }, [attempts, liveSession.id]);
 
   useEffect(() => {
     if (liveSession.sessionMode !== 'poll' || !currentQ) return;
@@ -117,6 +130,29 @@ export const LiveHostPanel: React.FC<LiveHostPanelProps> = ({ session, user, onC
         </div>
 
         <div className="lg:col-span-2 space-y-4">
+          {liveSession.livePhase === 'waiting' && (
+            <div className="glass rounded-2xl p-6 border border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-300 mb-4 uppercase tracking-wider">
+                Peserta yang telah bergabung ({liveAttempts.length})
+              </h3>
+              {liveAttempts.length === 0 ? (
+                <p className="text-slate-500 text-sm italic">Menunggu peserta memasukkan kode akses...</p>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {liveAttempts.map(a => {
+                    const u = usersMap[a.studentId];
+                    return (
+                      <div key={a.id} className="participant-card">
+                        <UserAvatar user={{ name: a.studentName, profilePhotoUrl: u?.profilePhotoUrl }} size="sm" />
+                        <span className="text-sm text-slate-200 font-medium truncate">{a.studentName}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {currentQ && liveSession.livePhase !== 'waiting' && (
             <div className="glass rounded-2xl p-6 border border-slate-800">
               <p className="text-lg font-semibold text-white mb-4">{currentQ.text}</p>
@@ -148,7 +184,7 @@ export const LiveHostPanel: React.FC<LiveHostPanelProps> = ({ session, user, onC
 
           {(liveSession.livePhase === 'leaderboard' || liveSession.livePhase === 'finished') && (
             <div className="glass rounded-2xl p-6 border border-slate-800">
-              <PodiumView entries={buildPodiumFromAttempts(liveAttempts.filter(a => a.status === 'completed'))} />
+              <PodiumView entries={buildPodiumFromAttempts(liveAttempts.filter(a => a.status === 'completed'), usersMap)} />
             </div>
           )}
         </div>

@@ -31,6 +31,17 @@ CREATE TABLE IF NOT EXISTS questions (
   difficulty TEXT NOT NULL CHECK (difficulty IN ('easy', 'medium', 'hard')) DEFAULT 'medium'
 );
 
+-- 2.5 Question Packages
+CREATE TABLE IF NOT EXISTS question_packages (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  image_url TEXT,
+  created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  questions JSONB NOT NULL DEFAULT '[]'::jsonb
+);
+
 -- 3. Quiz Sessions
 CREATE TABLE IF NOT EXISTS quiz_sessions (
   id TEXT PRIMARY KEY,
@@ -47,6 +58,7 @@ CREATE TABLE IF NOT EXISTS quiz_sessions (
   access_code TEXT NOT NULL,
   is_closed BOOLEAN NOT NULL DEFAULT false,
   questions JSONB NOT NULL DEFAULT '[]'::jsonb,
+  is_public BOOLEAN NOT NULL DEFAULT false,
   session_mode TEXT NOT NULL DEFAULT 'exam' CHECK (session_mode IN ('exam', 'live', 'homework', 'practice', 'poll')),
   live_phase TEXT NOT NULL DEFAULT 'waiting' CHECK (live_phase IN ('waiting', 'question', 'reveal', 'leaderboard', 'finished')),
   current_question_index INTEGER NOT NULL DEFAULT 0,
@@ -103,6 +115,16 @@ CREATE TABLE IF NOT EXISTS notifications (
   timestamp TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- 6.5 Reports
+CREATE TABLE IF NOT EXISTS reports (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK (type IN ('bug', 'feedback', 'question_error', 'other')),
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'resolved')),
+  timestamp TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- 7. Flashcard Progress
 CREATE TABLE IF NOT EXISTS flashcard_progress (
   id TEXT PRIMARY KEY,
@@ -130,18 +152,24 @@ ALTER TABLE attempts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activity_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE flashcard_progress ENABLE ROW LEVEL SECURITY;
+ALTER TABLE question_packages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow all users" ON users FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all questions" ON questions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all packages" ON question_packages FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all sessions" ON quiz_sessions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all attempts" ON attempts FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all logs" ON activity_logs FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all notifications" ON notifications FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all flashcard" ON flashcard_progress FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all reports" ON reports FOR ALL USING (true) WITH CHECK (true);
 
 -- Realtime
 ALTER PUBLICATION supabase_realtime ADD TABLE quiz_sessions;
 ALTER PUBLICATION supabase_realtime ADD TABLE attempts;
+ALTER PUBLICATION supabase_realtime ADD TABLE question_packages;
+ALTER PUBLICATION supabase_realtime ADD TABLE reports;
 
 -- Storage avatars
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)

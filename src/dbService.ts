@@ -29,7 +29,27 @@ export interface Question {
   options?: string[];
   correctAnswer: string;
   explanation: string;
+  explanation: string;
   difficulty: 'easy' | 'medium' | 'hard';
+}
+
+export interface QuestionPackage {
+  id: string;
+  title: string;
+  description: string;
+  imageUrl?: string;
+  createdBy: string;
+  createdAt: string;
+  questions: string[];
+}
+
+export interface Report {
+  id: string;
+  userId: string;
+  type: 'bug' | 'feedback' | 'question_error' | 'other';
+  message: string;
+  status: 'pending' | 'resolved';
+  timestamp: string;
 }
 
 export interface QuizSession {
@@ -47,6 +67,7 @@ export interface QuizSession {
   accessCode: string;
   isClosed: boolean;
   questions: string[];
+  isPublic: boolean;
   sessionMode: SessionMode;
   livePhase: LivePhase;
   currentQuestionIndex: number;
@@ -162,6 +183,7 @@ const rowToSession = (r: any): QuizSession => ({
   timerType: r.timer_type, perQuestionSeconds: r.per_question_seconds,
   accessCode: r.access_code, isClosed: r.is_closed,
   questions: r.questions ?? [],
+  isPublic: r.is_public ?? false,
   sessionMode: r.session_mode ?? 'exam',
   livePhase: r.live_phase ?? 'waiting',
   currentQuestionIndex: r.current_question_index ?? 0,
@@ -180,6 +202,7 @@ const sessionToRow = (s: QuizSession) => ({
   timer_type: s.timerType, per_question_seconds: s.perQuestionSeconds,
   access_code: s.accessCode, is_closed: s.isClosed,
   questions: s.questions,
+  is_public: s.isPublic,
   session_mode: s.sessionMode,
   live_phase: s.livePhase,
   current_question_index: s.currentQuestionIndex,
@@ -189,6 +212,28 @@ const sessionToRow = (s: QuizSession) => ({
   adaptive_enabled: s.adaptiveEnabled,
   teams_enabled: s.teamsEnabled,
   host_id: s.hostId ?? null,
+});
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const rowToPackage = (r: any): QuestionPackage => ({
+  id: r.id, title: r.title, description: r.description,
+  imageUrl: r.image_url ?? undefined, createdBy: r.created_by,
+  createdAt: r.created_at, questions: r.questions ?? [],
+});
+const packageToRow = (p: QuestionPackage) => ({
+  id: p.id, title: p.title, description: p.description,
+  image_url: p.imageUrl ?? null, created_by: p.createdBy,
+  created_at: p.createdAt, questions: p.questions,
+});
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const rowToReport = (r: any): Report => ({
+  id: r.id, userId: r.user_id, type: r.type,
+  message: r.message, status: r.status, timestamp: r.timestamp,
+});
+const reportToRow = (rep: Report) => ({
+  id: rep.id, user_id: rep.userId, type: rep.type,
+  message: rep.message, status: rep.status, timestamp: rep.timestamp,
 });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -286,6 +331,112 @@ export const dbGetUserById = async (userId: string): Promise<User | null> => {
     .maybeSingle();
   if (error) throw error;
   return data ? rowToUser(data) : null;
+};
+
+export const dbGetUsersByIds = async (userIds: string[]): Promise<User[]> => {
+  if (!userIds.length) return [];
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, name, email, role, user_class, xp, badges, profile_photo_url, bio, phone')
+    .in('id', userIds);
+  if (error) throw error;
+  return (data ?? []).map(rowToUser);
+};
+
+export interface GlobalLeaderboardEntry {
+  user: User;
+  totalQuizzes: number;
+  avgScore: number;
+  bestScore: number;
+  totalCorrect: number;
+  rank: number;
+}
+
+export const dbGetGlobalLeaderboard = async (): Promise<GlobalLeaderboardEntry[]> => {
+  // Fetch all users with xp
+  const { data: users, error: uErr } = await supabase
+    .from('users')
+    .select('id, name, email, role, user_class, xp, badges, profile_photo_url, bio, phone')
+    .eq('role', 'mahasiswa')
+    .order('xp', { ascending: false });
+  if (uErr) throw uErr;
+
+  // Fetch completed attempts for stats
+  const { data: attempts, error: aErr } = await supabase
+    .from('attempts')
+    .select('student_id, score, correct_count, total_questions')
+    .eq('status', 'completed');
+  if (aErr) throw aErr;
+
+  const attemptMap: Record<string, { scores: number[]; correct: number }> = {};
+  for (const a of (attempts ?? [])) {
+    if (!attemptMap[a.student_id]) {
+      attemptMap[a.student_id] = { scores: [], correct: 0 };
+    }
+    attemptMap[a.student_id].scores.push(a.score);
+    attemptMap[a.student_id].correct += a.correct_count;
+  }
+
+  return (users ?? []).map((u, idx) => {
+    const mapped = rowToUser(u);
+    const stats = attemptMap[u.id];
+    const scores = stats?.scores ?? [];
+    return {
+      user: mapped,
+      totalQuizzes: scores.length,
+      avgScore: scores.length ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length) : 0,
+      bestScore: scores.length ? Math.max(...scores) : 0,
+      totalCorrect: stats?.correct ?? 0,
+      rank: idx + 1,
+    };
+  });
+};
+
+export interface PublicProfileData {
+  user: User;
+  totalQuizzes: number;
+  avgScore: number;
+  bestScore: number;
+  totalCorrect: number;
+  recentAttempts: { sessionTitle: string; score: number; submitTime: string; correct: number; total: number }[];
+}
+
+export const dbGetPublicProfile = async (userId: string): Promise<PublicProfileData | null> => {
+  const user = await dbGetUserById(userId);
+  if (!user) return null;
+
+  const { data: attempts } = await supabase
+    .from('attempts')
+    .select('score, correct_count, total_questions, submit_time, quiz_session_id')
+    .eq('student_id', userId)
+    .eq('status', 'completed')
+    .order('submit_time', { ascending: false })
+    .limit(20);
+
+  const { data: sessions } = await supabase
+    .from('quiz_sessions')
+    .select('id, title');
+
+  const sessionMap: Record<string, string> = {};
+  (sessions ?? []).forEach((s: { id: string; title: string }) => { sessionMap[s.id] = s.title; });
+
+  const allAttempts = attempts ?? [];
+  const scores = allAttempts.map(a => a.score);
+
+  return {
+    user,
+    totalQuizzes: scores.length,
+    avgScore: scores.length ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length) : 0,
+    bestScore: scores.length ? Math.max(...scores) : 0,
+    totalCorrect: allAttempts.reduce((s, a) => s + (a.correct_count ?? 0), 0),
+    recentAttempts: allAttempts.slice(0, 5).map(a => ({
+      sessionTitle: sessionMap[a.quiz_session_id] ?? 'Unknown',
+      score: a.score,
+      submitTime: a.submit_time ?? '',
+      correct: a.correct_count ?? 0,
+      total: a.total_questions ?? 0,
+    })),
+  };
 };
 
 export const dbUpdateUserProfile = async (
@@ -872,3 +1023,71 @@ export const computeQuestionAnalysis = (
 
 // ── Legacy initDB (no-op) ────────────────────────────────────────────────────
 export const initDB = () => { /* no-op — data lives in Supabase now */ };
+
+// ── Question Packages ────────────────────────────────────────────────────────
+export const dbCreatePackage = async (
+  title: string, description: string, questions: string[], createdBy: string, imageUrl?: string
+): Promise<QuestionPackage> => {
+  const p: QuestionPackage = {
+    id: genId('pkg_'),
+    title,
+    description,
+    imageUrl,
+    createdBy,
+    createdAt: new Date().toISOString(),
+    questions,
+  };
+  const { error } = await supabase.from('question_packages').insert(packageToRow(p));
+  if (error) throw toAuthError(error, 'Gagal membuat paket soal.');
+  return p;
+};
+
+export const dbGetPackages = async (): Promise<QuestionPackage[]> => {
+  const { data, error } = await supabase.from('question_packages').select('*').order('created_at', { ascending: false });
+  if (error) throw toAuthError(error, 'Gagal memuat paket soal.');
+  return (data || []).map(rowToPackage);
+};
+
+export const dbGetPackageById = async (id: string): Promise<QuestionPackage> => {
+  const { data, error } = await supabase.from('question_packages').select('*').eq('id', id).single();
+  if (error || !data) throw toAuthError(error, 'Paket soal tidak ditemukan.');
+  return rowToPackage(data);
+};
+
+export const dbUpdatePackage = async (id: string, updates: Partial<QuestionPackage>): Promise<void> => {
+  const rowUpdates: any = {};
+  if (updates.title !== undefined) rowUpdates.title = updates.title;
+  if (updates.description !== undefined) rowUpdates.description = updates.description;
+  if (updates.imageUrl !== undefined) rowUpdates.image_url = updates.imageUrl;
+  if (updates.questions !== undefined) rowUpdates.questions = updates.questions;
+
+  const { error } = await supabase.from('question_packages').update(rowUpdates).eq('id', id);
+  if (error) throw toAuthError(error, 'Gagal memperbarui paket soal.');
+};
+
+export const dbDeletePackage = async (id: string): Promise<void> => {
+  const { error } = await supabase.from('question_packages').delete().eq('id', id);
+  if (error) throw toAuthError(error, 'Gagal menghapus paket soal.');
+};
+
+// ── Reports ──────────────────────────────────────────────────────────────────
+export const dbSubmitReport = async (userId: string, type: 'bug' | 'feedback' | 'question_error' | 'other', message: string): Promise<Report> => {
+  const rep: Report = {
+    id: genId('rep_'),
+    userId,
+    type,
+    message,
+    status: 'pending',
+    timestamp: new Date().toISOString(),
+  };
+  const { error } = await supabase.from('reports').insert(reportToRow(rep));
+  if (error) throw toAuthError(error, 'Gagal mengirim laporan.');
+  return rep;
+};
+
+// ── Public Quizzes (Perpustakaan Kuis) ───────────────────────────────────────
+export const dbGetPublicQuizzes = async (): Promise<QuizSession[]> => {
+  const { data, error } = await supabase.from('quiz_sessions').select('*').eq('is_public', true).order('start_time', { ascending: false });
+  if (error) throw toAuthError(error, 'Gagal memuat kuis publik.');
+  return (data || []).map(rowToSession);
+};

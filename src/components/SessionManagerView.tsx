@@ -19,7 +19,8 @@ export const SessionManagerView: React.FC<{ user?: import('../dbService').User }
     attempts: allAttempts,
     logs: allLogs,
     users,
-    refreshSessions
+    refreshSessions,
+    packages
   } = useAppContext();
 
   const [showForm, setShowForm] = useState(false);
@@ -39,8 +40,10 @@ export const SessionManagerView: React.FC<{ user?: import('../dbService').User }
   const [perQuestionSeconds, setPerQuestionSeconds] = useState(60);
   const [accessCode, setAccessCode] = useState('');
   const [selectedQuestions, setSelectedQuestions] = useState<string[]>([]);
+  const [selectedPackageId, setSelectedPackageId] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [sessionMode, setSessionMode] = useState<SessionMode>('exam');
+  const [isPublic, setIsPublic] = useState(false);
   const [proctorEnabled, setProctorEnabled] = useState(true);
   const [showExplanationMode, setShowExplanationMode] = useState<'never' | 'after_each' | 'after_submit'>('after_submit');
   const [speedBonusEnabled, setSpeedBonusEnabled] = useState(false);
@@ -78,6 +81,8 @@ export const SessionManagerView: React.FC<{ user?: import('../dbService').User }
     setSpeedBonusEnabled(false);
     setAdaptiveEnabled(false);
     setTeamsEnabled(false);
+    setIsPublic(false);
+    setSelectedPackageId('');
     setShowForm(true);
   };
 
@@ -101,6 +106,8 @@ export const SessionManagerView: React.FC<{ user?: import('../dbService').User }
     setSpeedBonusEnabled(s.speedBonusEnabled ?? false);
     setAdaptiveEnabled(s.adaptiveEnabled ?? false);
     setTeamsEnabled(s.teamsEnabled ?? false);
+    setIsPublic(s.isPublic ?? false);
+    setSelectedPackageId('');
     setShowForm(true);
   };
 
@@ -135,6 +142,7 @@ export const SessionManagerView: React.FC<{ user?: import('../dbService').User }
         accessCode: accessCode.toUpperCase(),
         isClosed: false,
         questions: selectedQuestions,
+        isPublic,
         ...modeDefaults,
         sessionMode,
         proctorEnabled: sessionMode === 'exam' ? proctorEnabled : false,
@@ -220,16 +228,16 @@ export const SessionManagerView: React.FC<{ user?: import('../dbService').User }
           <p className="text-slate-400 text-sm mt-1">Klik "Buat Sesi Baru" untuk memulai sesi ujian pertama Anda.</p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {sessions.map(session => {
             const status = getSessionStatus(session);
             const submissionCount = allAttempts.filter(a => a.quizSessionId === session.id && a.status === 'completed').length;
             const sessionLogs = getSessionLogs(session.id);
 
             return (
-              <div key={session.id} className="glass-card rounded-2xl p-5 border border-slate-800/60 hover:border-slate-700/80 transition-all">
-                <div className="flex flex-col lg:flex-row gap-4 justify-between">
-                  {/* Left: Info */}
+              <div key={session.id} className="glass-card rounded-2xl p-5 border border-slate-800/60 hover:border-slate-700/80 transition-all flex flex-col h-full">
+                <div className="flex flex-col gap-4 justify-between flex-1">
+                  {/* Top: Info */}
                   <div className="space-y-3 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={`text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full border ${status.color}`}>
@@ -300,8 +308,8 @@ export const SessionManagerView: React.FC<{ user?: import('../dbService').User }
                     )}
                   </div>
 
-                  {/* Right: Actions */}
-                  <div className="flex lg:flex-col gap-2 items-start flex-wrap">
+                  {/* Bottom: Actions */}
+                  <div className="flex flex-wrap gap-2 items-center border-t border-slate-800/50 pt-4 mt-auto">
                     {(session.sessionMode === 'live' || session.sessionMode === 'poll') && (
                       <button
                         onClick={() => setLiveHostSession(session)}
@@ -475,6 +483,7 @@ export const SessionManagerView: React.FC<{ user?: import('../dbService').User }
                 </h4>
                 <div className="grid grid-cols-2 gap-3">
                   {[
+                    { label: 'Sesi Publik (Perpustakaan Kuis)', value: isPublic, onChange: setIsPublic },
                     { label: 'Acak Urutan Soal', value: shuffleQuestions, onChange: setShuffleQuestions },
                     { label: 'Acak Opsi Jawaban', value: shuffleOptions, onChange: setShuffleOptions },
                   ].map(({ label, value, onChange }) => (
@@ -497,8 +506,30 @@ export const SessionManagerView: React.FC<{ user?: import('../dbService').User }
               {/* Question Selector */}
               <div>
                 <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">
-                  Pilih Soal <span className="text-uir-yellow-gold">({selectedQuestions.length} dipilih)</span>
+                  Pilih Paket Soal atau Pilih Manual <span className="text-uir-yellow-gold">({selectedQuestions.length} dipilih)</span>
                 </label>
+                
+                <div className="mb-3">
+                  <select
+                    className="w-full px-3 py-2.5 rounded-xl glass-input text-sm"
+                    value={selectedPackageId}
+                    onChange={(e) => {
+                      setSelectedPackageId(e.target.value);
+                      if (e.target.value) {
+                        const pkg = packages.find(p => p.id === e.target.value);
+                        if (pkg) setSelectedQuestions(pkg.questions);
+                      } else {
+                        setSelectedQuestions([]);
+                      }
+                    }}
+                  >
+                    <option value="">Pilih dari Paket Soal (Opsional)</option>
+                    {packages.map(pkg => (
+                      <option key={pkg.id} value={pkg.id}>{pkg.title} ({pkg.questions.length} Soal)</option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="max-h-52 overflow-y-auto space-y-2 pr-1">
                   {allQuestions.length === 0 ? (
                     <div className="text-center py-6 text-slate-400 text-sm">

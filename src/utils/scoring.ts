@@ -67,7 +67,15 @@ export const xpForAttempt = (score: number, bonus: number, violations: number): 
 
 export const buildPodiumFromAttempts = (
   attempts: Attempt[],
-): { name: string; score: number; bonus?: number }[] =>
+  usersMap?: Record<string, { profilePhotoUrl?: string }>,
+): { name: string; score: number; bonus?: number; profilePhotoUrl?: string; userId?: string }[] =>
   [...attempts]
     .sort((a, b) => b.score - a.score || (a.submitTime ?? '').localeCompare(b.submitTime ?? ''))
-    .map(a => ({ name: a.studentName, score: a.score, bonus: a.bonusPoints }));
+    .map(a => ({
+      name: a.studentName,
+      score: a.score,
+      bonus: a.bonusPoints,
+      profilePhotoUrl: usersMap?.[a.studentId]?.profilePhotoUrl,
+      userId: a.studentId,
+    }));
+

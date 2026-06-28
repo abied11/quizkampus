@@ -5,12 +5,16 @@ import { LeaderboardScreen } from './LeaderboardScreen';
 import { StudentProgressView } from './StudentProgressView';
 import { NotificationBell } from './NotificationBell';
 import { FlashcardView } from './FlashcardView';
+import { QuizLibraryView } from './QuizLibraryView';
 import { ProfileView } from './ProfileView';
+import { AboutView } from './AboutView';
+import { ReportView } from './ReportView';
 import { UserAvatar } from './UserAvatar';
 import { isSoundEnabled, setSoundEnabled } from '../utils/sounds';
+import Aurora from './Aurora';
 import {
   GraduationCap, Play, Trophy, LogOut, ChevronRight,
-  User as UserIcon, BarChart2, Layers, Volume2, VolumeX, UserCircle
+  User as UserIcon, BarChart2, Layers, Volume2, VolumeX, UserCircle, BookOpen, Info, Flag
 } from 'lucide-react';
 
 interface MahasiswaDashboardProps {
@@ -19,19 +23,23 @@ interface MahasiswaDashboardProps {
   onUserUpdated: (user: User) => void;
 }
 
-type MhsTab = 'quiz' | 'flashcards' | 'progress' | 'leaderboard' | 'profile';
+type MhsTab = 'quiz' | 'library' | 'flashcards' | 'progress' | 'leaderboard' | 'profile' | 'report' | 'about';
 
 export const MahasiswaDashboard: React.FC<MahasiswaDashboardProps> = ({ user, onLogout, onUserUpdated }) => {
   const [activeTab, setActiveTab] = useState<MhsTab>('quiz');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [soundOn, setSoundOn] = useState(isSoundEnabled);
+  const [pendingQuizCode, setPendingQuizCode] = useState<string | undefined>(undefined);
 
   const tabs: { id: MhsTab; label: string; icon: React.ElementType; desc: string }[] = [
     { id: 'quiz',        label: 'Ikuti Kuis',   icon: Play,     desc: 'Masukkan kode akses dan mulai ujian' },
+    { id: 'library',     label: 'Perpustakaan Kuis', icon: BookOpen, desc: 'Jelajahi kuis publik untuk latihan' },
     { id: 'flashcards',  label: 'Flashcard',    icon: Layers,   desc: 'Mode belajar kartu & spaced repetition' },
     { id: 'progress',   label: 'Progres Saya',  icon: BarChart2, desc: 'Pantau perkembangan nilai, XP & badge' },
     { id: 'leaderboard', label: 'Peringkat',    icon: Trophy,   desc: 'Papan peringkat peserta kuis' },
     { id: 'profile',     label: 'Profil',       icon: UserCircle, desc: 'Edit foto profil dan data diri' },
+    { id: 'report',      label: 'Laporan',      icon: Flag,       desc: 'Kirim laporan bug atau masukan' },
+    { id: 'about',       label: 'Tentang',      icon: Info,       desc: 'Informasi tentang aplikasi' },
   ];
 
   const activeTabInfo = tabs.find(t => t.id === activeTab)!;
@@ -39,9 +47,14 @@ export const MahasiswaDashboard: React.FC<MahasiswaDashboardProps> = ({ user, on
   return (
     <div className="min-h-screen flex">
       {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} shrink-0 transition-all duration-300 sidebar-gradient border-r border-slate-800/80 flex flex-col h-screen sticky top-0`}>
+      <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} shrink-0 transition-all duration-300 sidebar-gradient border-r border-slate-800/80 flex flex-col h-screen sticky top-0 relative overflow-hidden`}>
+        {/* Aurora Background overlay */}
+        <div className="dashboard-aurora-wrap">
+          <Aurora speed={0.45} blend={0.65} amplitude={0.8} colorStops={["#7cff67", "#065D3E", "#033523"]} />
+        </div>
+
         {/* Logo */}
-        <div className={`flex items-center gap-3 px-4 py-5 border-b border-slate-800/80 ${!sidebarOpen ? 'justify-center' : ''}`}>
+        <div className={`flex items-center gap-3 px-4 py-5 border-b border-slate-800/80 relative z-10 ${!sidebarOpen ? 'justify-center' : ''}`}>
           <div className="p-2 rounded-xl bg-gradient-to-tr from-uir-green-dark to-uir-green-medium shrink-0 shadow-lg shadow-uir-green-dark/20">
             <GraduationCap className="h-5 w-5 text-white" />
           </div>
@@ -54,7 +67,7 @@ export const MahasiswaDashboard: React.FC<MahasiswaDashboardProps> = ({ user, on
         </div>
 
         {/* Nav Items */}
-        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto relative z-10">
           {tabs.map(({ id, label, icon: Icon }, idx) => (
             <button
               key={id}
@@ -77,7 +90,7 @@ export const MahasiswaDashboard: React.FC<MahasiswaDashboardProps> = ({ user, on
         </nav>
 
         {/* Profile & Logout */}
-        <div className="p-3 border-t border-slate-800/80 space-y-2">
+        <div className="p-3 border-t border-slate-800/80 space-y-2 relative z-10">
           {sidebarOpen && (
             <div className="px-3 py-2.5 rounded-xl bg-slate-950/40 flex items-center gap-2.5 animate-fade-in">
               <UserAvatar user={user} size="sm" />
@@ -134,13 +147,26 @@ export const MahasiswaDashboard: React.FC<MahasiswaDashboardProps> = ({ user, on
             {activeTab === 'quiz' && (
               <QuizAttemptScreen
                 user={user}
-                onBack={() => setActiveTab('quiz')}
+                onBack={() => { setActiveTab('quiz'); setPendingQuizCode(undefined); }}
+                initialAccessCode={pendingQuizCode}
+                key={pendingQuizCode || 'quiz-screen'} // Force re-render when code changes
+              />
+            )}
+            {activeTab === 'library' && (
+              <QuizLibraryView 
+                user={user}
+                onStartQuiz={(code) => {
+                  setPendingQuizCode(code);
+                  setActiveTab('quiz');
+                }}
               />
             )}
             {activeTab === 'flashcards' && <FlashcardView user={user} />}
             {activeTab === 'progress' && <StudentProgressView user={user} />}
             {activeTab === 'leaderboard' && <LeaderboardScreen />}
             {activeTab === 'profile' && <ProfileView user={user} onUserUpdated={onUserUpdated} />}
+            {activeTab === 'report' && <ReportView user={user} />}
+            {activeTab === 'about' && <AboutView />}
           </div>
         </div>
       </main>

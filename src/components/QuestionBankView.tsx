@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { dbSaveQuestion, dbDeleteQuestion, dbBulkUploadQuestions } from '../dbService';
 import type { Question } from '../dbService';
-import { Search, Plus, Trash2, Edit2, Upload, Download, Check, AlertCircle, X, HelpCircle, GraduationCap, Link2, PlusCircle, MinusCircle, Sparkles, FileSpreadsheet } from 'lucide-react';
+import { Package, Search, Plus, Trash2, Edit2, Upload, Download, Check, AlertCircle, X, HelpCircle, GraduationCap, Link2, PlusCircle, MinusCircle, Sparkles, FileSpreadsheet } from 'lucide-react';
 import { useAppContext } from '../hooks/useAppContext';
 import { generateQuestionsWithAI } from '../utils/aiQuestionGenerator';
 import * as XLSX from 'xlsx';
+import { dbCreatePackage, dbDeletePackage, dbUpdatePackage } from '../dbService';
 
-export const QuestionBankView: React.FC = () => {
-  const { questions, refreshQuestions } = useAppContext();
+export const QuestionBankView: React.FC<{ currentUser?: import('../dbService').User }> = ({ currentUser }) => {
+  const { questions, refreshQuestions, packages, refreshPackages } = useAppContext();
+  const [activeMainTab, setActiveMainTab] = useState<'soal' | 'paket'>('soal');
   const [search, setSearch] = useState('');
   const [subjectFilter, setSubjectFilter] = useState('');
   const [difficultyFilter, setDifficultyFilter] = useState('');
@@ -25,6 +27,15 @@ export const QuestionBankView: React.FC = () => {
   const [difficulty, setDifficulty] = useState<Question['difficulty']>('medium');
   const [isSaving, setIsSaving] = useState(false);
 
+  // Package Form states
+  const [showPackageForm, setShowPackageForm] = useState(false);
+  const [editingPackageId, setEditingPackageId] = useState<string | undefined>(undefined);
+  const [packageTitle, setPackageTitle] = useState('');
+  const [packageDesc, setPackageDesc] = useState('');
+  const [packageImageUrl, setPackageImageUrl] = useState('');
+  const [packageQuestions, setPackageQuestions] = useState<string[]>([]);
+  const [packageSearch, setPackageSearch] = useState('');
+
   // CSV Bulk upload states
   const [showCSVUpload, setShowCSVUpload] = useState(false);
   const [csvContent, setCsvContent] = useState('');
@@ -37,6 +48,13 @@ export const QuestionBankView: React.FC = () => {
   const [aiDifficulty, setAiDifficulty] = useState<Question['difficulty']>('medium');
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiPreview, setAiPreview] = useState<Omit<Question, 'id'>[]>([]);
+
+  // Text Copy-Paste Auto-Parse states
+  const [showTextImport, setShowTextImport] = useState(false);
+  const [importTextContent, setImportTextContent] = useState('');
+  const [importTextSubject, setImportTextSubject] = useState('');
+  const [importTextTopic, setImportTextTopic] = useState('');
+  const [parsedDrafts, setParsedDrafts] = useState<Omit<Question, 'id'>[]>([]);
 
   // Matching pairs state: [{left, right}]
   const [matchingPairs, setMatchingPairs] = useState<{ left: string; right: string }[]>([
@@ -89,6 +107,70 @@ export const QuestionBankView: React.FC = () => {
       } catch (err: any) {
         alert('Gagal menghapus soal: ' + err.message);
       }
+    }
+  };
+
+  const handleOpenNewPackageForm = () => {
+    setEditingPackageId(undefined);
+    setPackageTitle('');
+    setPackageDesc('');
+    setPackageImageUrl('');
+    setPackageQuestions([]);
+    setShowPackageForm(true);
+  };
+
+  const handleOpenEditPackageForm = (pkg: import('../dbService').QuestionPackage) => {
+    setEditingPackageId(pkg.id);
+    setPackageTitle(pkg.title);
+    setPackageDesc(pkg.description);
+    setPackageImageUrl(pkg.imageUrl || '');
+    setPackageQuestions([...pkg.questions]);
+    setShowPackageForm(true);
+  };
+
+  const handleDeletePackage = async (id: string) => {
+    if (confirm('Yakin ingin menghapus paket soal ini?')) {
+      try {
+        await dbDeletePackage(id);
+        await refreshPackages();
+      } catch (err: any) {
+        alert('Gagal menghapus paket: ' + err.message);
+      }
+    }
+  };
+
+  const handleSavePackage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!packageTitle) {
+      alert('Judul paket wajib diisi.');
+      return;
+    }
+    if (packageQuestions.length === 0) {
+      alert('Pilih minimal 1 soal untuk dimasukkan ke paket.');
+      return;
+    }
+    if (!currentUser) {
+      alert('Sesi pengguna tidak valid.');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      if (editingPackageId) {
+        await dbUpdatePackage(editingPackageId, {
+          title: packageTitle,
+          description: packageDesc,
+          imageUrl: packageImageUrl || undefined,
+          questions: packageQuestions,
+        });
+      } else {
+        await dbCreatePackage(packageTitle, packageDesc, packageQuestions, currentUser.id, packageImageUrl || undefined);
+      }
+      setShowPackageForm(false);
+      await refreshPackages();
+    } catch (err: any) {
+      alert('Gagal menyimpan paket: ' + err.message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -236,6 +318,121 @@ export const QuestionBankView: React.FC = () => {
     setAiPreview([]);
   };
 
+  // Parsing engine for raw text copy-paste
+  const parseTextToQuestions = (textStr: string, subj: string, topicStr: string) => {
+    // Regex matches common question starters: 1. or 1) or Soal 1:
+    const questionBlocks = textStr.split(/(?=\b\d+[\.\)\-]\s+)|(?=\bSoal\s*\d+[\.\)\-]?\s+)/gi)
+      .map(b => b.trim())
+      .filter(Boolean);
+    
+    const results: Omit<Question, 'id'>[] = [];
+
+    for (const block of questionBlocks) {
+      const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+      if (!lines.length) continue;
+
+      // First line is the question text (remove prefix number)
+      let qText = lines[0].replace(/^\s*(?:Soal\s*)?\d+[\.\)\-]?\s*/gi, '').trim();
+      const optLines: string[] = [];
+      let correct = '';
+      let expl = '';
+      let diff: Question['difficulty'] = 'medium';
+      let textEnded = false;
+
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        
+        // Match option pattern e.g., A. Option text, B) Option, etc.
+        const optMatch = line.match(/^\s*([A-Ea-e])[\.\)\-\s]\s*(.*)/i);
+        
+        if (optMatch) {
+          textEnded = true;
+          optLines.push(optMatch[2].trim());
+        } else if (line.toLowerCase().startsWith('kunci:') || line.toLowerCase().startsWith('jawaban:') || line.toLowerCase().startsWith('answer:') || line.toLowerCase().startsWith('key:')) {
+          textEnded = true;
+          correct = line.replace(/^\s*(?:kunci|jawaban|answer|key):\s*/gi, '').trim();
+        } else if (line.toLowerCase().startsWith('pembahasan:') || line.toLowerCase().startsWith('penjelasan:') || line.toLowerCase().startsWith('explanation:')) {
+          textEnded = true;
+          expl = line.replace(/^\s*(?:pembahasan|penjelasan|explanation):\s*/gi, '').trim();
+        } else if (line.toLowerCase().startsWith('kesulitan:') || line.toLowerCase().startsWith('difficulty:')) {
+          textEnded = true;
+          const dText = line.replace(/^\s*(?:kesulitan|difficulty):\s*/gi, '').trim().toLowerCase();
+          if (dText.includes('easy') || dText.includes('mudah')) diff = 'easy';
+          else if (dText.includes('hard') || dText.includes('sulit')) diff = 'hard';
+          else diff = 'medium';
+        } else {
+          // If option/metadata has not started, treat as part of multiline question text
+          if (!textEnded) {
+            qText += ' ' + line;
+          }
+        }
+      }
+
+      let qType: Question['type'] = 'multiple_choice';
+      if (optLines.length === 0) {
+        if (correct.toLowerCase() === 'true' || correct.toLowerCase() === 'false' || correct.toLowerCase() === 'benar' || correct.toLowerCase() === 'salah') {
+          qType = 'boolean';
+          correct = (correct.toLowerCase() === 'true' || correct.toLowerCase() === 'benar') ? 'true' : 'false';
+        } else {
+          qType = 'essay';
+        }
+      } else {
+        // If answer was specified as a single letter choice, match with options
+        const matchLetter = correct.match(/^\s*([A-Ea-e])\s*$/);
+        if (matchLetter) {
+          const idx = matchLetter[1].toUpperCase().charCodeAt(0) - 65;
+          if (optLines[idx]) {
+            correct = optLines[idx];
+          }
+        }
+      }
+
+      results.push({
+        subject: subj || 'Umum',
+        topic: topicStr || 'Umum',
+        type: qType,
+        text: qText,
+        options: optLines.length ? optLines : undefined,
+        correctAnswer: correct,
+        explanation: expl,
+        difficulty: diff,
+      });
+    }
+    return results;
+  };
+
+  const handleParseText = () => {
+    if (!importTextContent.trim()) {
+      alert('Tempelkan isi salinan teks terlebih dahulu.');
+      return;
+    }
+    const parsed = parseTextToQuestions(importTextContent, importTextSubject, importTextTopic);
+    if (parsed.length === 0) {
+      alert('Tidak ditemukan format soal kuis yang valid. Gunakan format seperti 1. Pertanyaan ...');
+      return;
+    }
+    setParsedDrafts(parsed);
+  };
+
+  const handleSaveParsed = async () => {
+    if (parsedDrafts.length === 0) return;
+    setIsSaving(true);
+    try {
+      for (const q of parsedDrafts) {
+        await dbSaveQuestion(q);
+      }
+      await refreshQuestions();
+      setShowTextImport(false);
+      setParsedDrafts([]);
+      setImportTextContent('');
+      alert(`Berhasil mengimpor ${parsedDrafts.length} soal kuis ke bank soal.`);
+    } catch (err: unknown) {
+      alert('Gagal mengimpor soal: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const filteredQuestions = questions.filter(q => {
     const matchSearch = q.text.toLowerCase().includes(search.toLowerCase()) || 
                         q.topic.toLowerCase().includes(search.toLowerCase());
@@ -269,8 +466,15 @@ export const QuestionBankView: React.FC = () => {
             Generate AI
           </button>
           <button
+            onClick={() => setShowTextImport(true)}
+            className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 text-sm font-semibold flex items-center gap-2 transition-all active:scale-95 btn-press"
+          >
+            <Upload className="h-4 w-4" />
+            Tempel Teks Soal
+          </button>
+          <button
             onClick={() => setShowCSVUpload(true)}
-            className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 text-sm font-semibold flex items-center gap-2 transition-all active:scale-95"
+            className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 text-sm font-semibold flex items-center gap-2 transition-all active:scale-95 btn-press"
           >
             <Upload className="h-4 w-4" />
             Unggah Masal CSV
@@ -286,8 +490,26 @@ export const QuestionBankView: React.FC = () => {
         </div>
       </div>
 
-      {/* Filter and Search Panel */}
-      <div className="glass rounded-2xl p-4 flex flex-col md:flex-row gap-3 border border-slate-800">
+      {/* Tabs */}
+      <div className="flex gap-2 border-b border-slate-800 pb-2">
+        <button
+          onClick={() => setActiveMainTab('soal')}
+          className={`px-4 py-2 text-sm font-semibold rounded-t-xl transition-all ${activeMainTab === 'soal' ? 'bg-slate-800 text-uir-green-muted border-b-2 border-uir-green-medium' : 'text-slate-400 hover:text-slate-200'}`}
+        >
+          Daftar Soal
+        </button>
+        <button
+          onClick={() => setActiveMainTab('paket')}
+          className={`px-4 py-2 text-sm font-semibold rounded-t-xl transition-all ${activeMainTab === 'paket' ? 'bg-slate-800 text-uir-green-muted border-b-2 border-uir-green-medium' : 'text-slate-400 hover:text-slate-200'}`}
+        >
+          Paket Soal
+        </button>
+      </div>
+
+      {activeMainTab === 'soal' && (
+        <>
+          {/* Filter and Search Panel */}
+          <div className="glass rounded-2xl p-4 flex flex-col md:flex-row gap-3 border border-slate-800">
         <div className="flex-1 relative">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <input
@@ -475,6 +697,183 @@ export const QuestionBankView: React.FC = () => {
           ))
         )}
       </div>
+      </>
+      )}
+
+      {/* PAKET SOAL TAB */}
+      {activeMainTab === 'paket' && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center bg-slate-900 p-4 rounded-xl border border-slate-800">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Package className="h-5 w-5 text-uir-green-medium" />
+              Daftar Paket Soal
+            </h3>
+            <button
+              onClick={handleOpenNewPackageForm}
+              className="px-4 py-2.5 rounded-xl bg-uir-green-medium hover:bg-uir-green-dark text-white text-sm font-semibold flex items-center gap-2 shadow-lg shadow-uir-green-dark/25 transition-all active:scale-95"
+            >
+              <Plus className="h-4 w-4" />
+              Buat Paket Baru
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {packages.length === 0 ? (
+              <div className="col-span-full glass rounded-2xl p-12 text-center border border-slate-800/80">
+                <Package className="h-12 w-12 text-slate-500 mx-auto mb-3" />
+                <h3 className="text-lg font-semibold text-slate-300">Belum ada paket soal</h3>
+                <p className="text-slate-400 text-sm mt-1 max-w-md mx-auto">
+                  Buat paket soal untuk mengelompokkan soal kuis agar lebih mudah dipilih.
+                </p>
+              </div>
+            ) : (
+              packages.map(pkg => (
+                <div key={pkg.id} className="glass-card rounded-2xl p-0 border border-slate-800/60 overflow-hidden hover:border-slate-700/80 transition-all flex flex-col group relative">
+                  <div className="h-32 w-full bg-slate-900 relative">
+                    {pkg.imageUrl ? (
+                      <img src={pkg.imageUrl} alt={pkg.title} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-br from-slate-800 to-slate-900 flex items-center justify-center">
+                        <Package className="h-10 w-10 text-slate-700" />
+                      </div>
+                    )}
+                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => handleOpenEditPackageForm(pkg)} className="p-1.5 bg-slate-900/80 backdrop-blur rounded-lg text-uir-yellow-gold hover:text-white hover:bg-slate-800">
+                        <Edit2 className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={() => handleDeletePackage(pkg.id)} className="p-1.5 bg-red-950/80 backdrop-blur rounded-lg text-red-400 hover:text-white hover:bg-red-900">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="p-4 flex-1 flex flex-col">
+                    <h4 className="text-base font-bold text-white mb-1 line-clamp-1">{pkg.title}</h4>
+                    <p className="text-xs text-slate-400 line-clamp-2 flex-1">{pkg.description || 'Tidak ada deskripsi'}</p>
+                    <div className="mt-3 pt-3 border-t border-slate-800/50 flex items-center justify-between">
+                      <span className="text-xs font-medium text-slate-400">
+                        <span className="text-white">{pkg.questions.length}</span> Soal
+                      </span>
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-uir-green-darker/40 text-uir-green-muted border border-uir-green-medium/10">
+                        Paket
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL FORM: Add / Edit Package */}
+      {showPackageForm && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="glass rounded-3xl w-full max-w-4xl border border-slate-800 max-h-[90vh] overflow-y-auto flex flex-col">
+            <div className="p-6 border-b border-slate-850 flex justify-between items-center bg-slate-900/35">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Package className="h-5 w-5 text-uir-green-medium" />
+                {editingPackageId ? 'Edit Paket Soal' : 'Buat Paket Soal Baru'}
+              </h3>
+              <button
+                onClick={() => setShowPackageForm(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePackage} className="p-6 space-y-4 flex-1 flex flex-col">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Judul Paket</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Paket UTS PBO"
+                    value={packageTitle}
+                    onChange={(e) => setPackageTitle(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl glass-input text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">URL Gambar (Opsional)</label>
+                  <input
+                    type="url"
+                    placeholder="https://example.com/image.jpg"
+                    value={packageImageUrl}
+                    onChange={(e) => setPackageImageUrl(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl glass-input text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">Deskripsi (Opsional)</label>
+                <textarea
+                  placeholder="Keterangan mengenai paket ini..."
+                  value={packageDesc}
+                  onChange={(e) => setPackageDesc(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl glass-input text-sm resize-none h-20"
+                />
+              </div>
+
+              <div className="flex-1 border border-slate-800 rounded-xl overflow-hidden flex flex-col mt-2 min-h-[300px]">
+                <div className="p-3 bg-slate-900/60 border-b border-slate-800 flex justify-between items-center">
+                  <h4 className="text-sm font-semibold text-white">Pilih Soal ({packageQuestions.length} terpilih)</h4>
+                  <div className="relative w-64">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                    <input 
+                      type="text" 
+                      placeholder="Cari soal..." 
+                      value={packageSearch}
+                      onChange={(e) => setPackageSearch(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 rounded-lg glass-input text-xs"
+                    />
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-2 space-y-2 max-h-64">
+                  {questions
+                    .filter(q => q.text.toLowerCase().includes(packageSearch.toLowerCase()) || q.topic.toLowerCase().includes(packageSearch.toLowerCase()))
+                    .map(q => (
+                    <label key={q.id} className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${packageQuestions.includes(q.id) ? 'bg-uir-green-medium/10 border-uir-green-medium/30' : 'bg-slate-900/30 border-slate-800 hover:border-slate-700'}`}>
+                      <input 
+                        type="checkbox" 
+                        className="mt-1"
+                        checked={packageQuestions.includes(q.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) setPackageQuestions([...packageQuestions, q.id]);
+                          else setPackageQuestions(packageQuestions.filter(id => id !== q.id));
+                        }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-200 truncate">{q.text}</p>
+                        <p className="text-xs text-slate-400 truncate">{q.subject} - {q.topic}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-4 flex justify-end gap-3 mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowPackageForm(false)}
+                  className="px-5 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-350 hover:bg-slate-850 text-sm font-semibold btn-press"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="px-5 py-2.5 rounded-xl bg-uir-green-medium hover:bg-uir-green-dark text-white text-sm font-semibold transition-all active:scale-95 btn-press"
+                >
+                  {isSaving ? 'Menyimpan...' : 'Simpan Paket'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL FORM: Add / Edit Question */}
       {showForm && (
@@ -922,6 +1321,156 @@ export const QuestionBankView: React.FC = () => {
                 Simpan {aiPreview.length} Soal ke Bank
               </button>
             )}
+          </div>
+        </div>
+      )}
+      {/* Text Copy-Paste Auto-Parse Modal */}
+      {showTextImport && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="glass rounded-3xl w-full max-w-2xl border border-slate-800 flex flex-col overflow-hidden max-h-[90vh]">
+            <div className="p-6 border-b border-slate-850 flex justify-between items-center bg-slate-900/35">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-uir-green-medium animate-pulse" />
+                Tempel Salinan Teks Soal
+              </h3>
+              <button
+                onClick={() => {
+                  setShowTextImport(false);
+                  setParsedDrafts([]);
+                  setImportTextContent('');
+                }}
+                className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-4 flex-1">
+              <p className="text-xs text-slate-400">
+                Tempelkan kumpulan soal kuis Anda di bawah. Parser otomatis akan memisahkan pertanyaan, opsi, kunci jawaban, dan pembahasan.
+              </p>
+
+              {/* Subject & Topic Defaults */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Mata Kuliah Default</label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Pemrograman Web"
+                    value={importTextSubject}
+                    onChange={e => setImportTextSubject(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl glass-input text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Topik Default</label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: JavaScript"
+                    value={importTextTopic}
+                    onChange={e => setImportTextTopic(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl glass-input text-xs"
+                  />
+                </div>
+              </div>
+
+              {parsedDrafts.length === 0 ? (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Teks Soal</label>
+                  <textarea
+                    rows={10}
+                    placeholder="Contoh format teks:&#10;1. Ibu kota Indonesia adalah...&#10;A. Jakarta&#10;B. Bandung&#10;C. Surabaya&#10;Jawaban: A&#10;Pembahasan: Jakarta adalah ibu kota negara.&#10;&#10;2. React dikembangkan oleh Facebook.&#10;a. Benar&#10;b. Salah&#10;Jawaban: A"
+                    value={importTextContent}
+                    onChange={e => setImportTextContent(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl glass-input text-xs font-mono leading-relaxed"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                      Preview Draft Hasil Parse ({parsedDrafts.length} Soal)
+                    </h4>
+                    <button
+                      onClick={() => setParsedDrafts([])}
+                      className="text-xs text-uir-yellow-gold hover:underline"
+                    >
+                      Edit Teks Mentah
+                    </button>
+                  </div>
+
+                  <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                    {parsedDrafts.map((q, idx) => {
+                      const hasErr = q.type === 'multiple_choice' && (!q.options || q.options.length < 2);
+                      return (
+                        <div
+                          key={idx}
+                          className={`parsed-question-card ${hasErr ? 'has-error' : ''}`}
+                        >
+                          <div className="flex justify-between items-start gap-2">
+                            <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded font-mono">
+                              #{idx + 1} • {q.type === 'multiple_choice' ? 'Pilihan Ganda' : q.type === 'boolean' ? 'Benar/Salah' : 'Essay'}
+                            </span>
+                            <span className="text-[10px] text-slate-500 uppercase font-bold">{q.difficulty}</span>
+                          </div>
+                          <p className="text-sm font-semibold text-slate-200 mt-2">{q.text}</p>
+                          {q.options && (
+                            <ul className="mt-2 pl-4 list-disc text-xs text-slate-400 space-y-0.5">
+                              {q.options.map((opt, oIdx) => (
+                                <li key={oIdx} className={opt === q.correctAnswer ? 'text-emerald-400 font-bold' : ''}>
+                                  {opt}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          {!q.options && q.type !== 'essay' && (
+                            <p className="text-xs text-emerald-400 font-bold mt-1">Kunci: {q.correctAnswer}</p>
+                          )}
+                          {q.explanation && (
+                            <p className="text-[11px] text-slate-500 mt-1 italic">💡 {q.explanation}</p>
+                          )}
+                          {hasErr && (
+                            <p className="text-[10px] text-red-400 mt-2">⚠️ Error: Opsi jawaban kurang dari 2.</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-slate-850 bg-slate-900/20 flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTextImport(false);
+                  setParsedDrafts([]);
+                  setImportTextContent('');
+                }}
+                className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-350 hover:bg-slate-850 text-sm font-semibold btn-press"
+              >
+                Batal
+              </button>
+              {parsedDrafts.length === 0 ? (
+                <button
+                  type="button"
+                  onClick={handleParseText}
+                  className="px-5 py-2.5 rounded-xl bg-uir-green-medium hover:bg-uir-green-dark text-white text-sm font-semibold transition-all active:scale-95 btn-press"
+                >
+                  Parse Teks Soal
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSaveParsed}
+                  disabled={isSaving}
+                  className="px-5 py-2.5 rounded-xl bg-uir-green-medium hover:bg-uir-green-dark text-white text-sm font-semibold transition-all active:scale-95 btn-press"
+                >
+                  {isSaving ? 'Menyimpan...' : 'Simpan Semua Soal'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

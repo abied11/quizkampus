@@ -1,9 +1,9 @@
 import React, { createContext, useState, useEffect, useCallback } from 'react';
 import {
-  dbGetUsers, dbGetQuestions, dbGetSessions, dbGetAttempts, dbGetLogs, dbGetNotifications,
+  dbGetUsers, dbGetQuestions, dbGetSessions, dbGetAttempts, dbGetLogs, dbGetNotifications, dbGetPackages
 } from './dbService';
 import type {
-  User, Question, QuizSession, Attempt, ActivityLog, Notification,
+  User, Question, QuizSession, Attempt, ActivityLog, Notification, QuestionPackage
 } from './dbService';
 import { supabase } from './supabaseClient';
 
@@ -15,6 +15,7 @@ interface AppContextType {
   attempts: Attempt[];
   logs: ActivityLog[];
   notifications: Notification[];
+  packages: QuestionPackage[];
   // Loading state
   loading: boolean;
   // Refresh methods
@@ -24,6 +25,7 @@ interface AppContextType {
   refreshAttempts: () => Promise<void>;
   refreshLogs: () => Promise<void>;
   refreshNotifications: (userId?: string) => Promise<void>;
+  refreshPackages: () => Promise<void>;
   refreshAll: () => Promise<void>;
 }
 
@@ -42,6 +44,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [packages, setPackages] = useState<QuestionPackage[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refreshUsers = useCallback(async () => {
@@ -68,14 +71,18 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     try { setNotifications(await dbGetNotifications(userId)); } catch (e) { console.error('refreshNotifications', e); }
   }, []);
 
+  const refreshPackages = useCallback(async () => {
+    try { setPackages(await dbGetPackages()); } catch (e) { console.error('refreshPackages', e); }
+  }, []);
+
   const refreshAll = useCallback(async () => {
     setLoading(true);
     await Promise.all([
       refreshUsers(), refreshQuestions(), refreshSessions(),
-      refreshAttempts(), refreshLogs(), refreshNotifications(),
+      refreshAttempts(), refreshLogs(), refreshNotifications(), refreshPackages()
     ]);
     setLoading(false);
-  }, [refreshUsers, refreshQuestions, refreshSessions, refreshAttempts, refreshLogs, refreshNotifications]);
+  }, [refreshUsers, refreshQuestions, refreshSessions, refreshAttempts, refreshLogs, refreshNotifications, refreshPackages]);
 
   // Initial load
   useEffect(() => { refreshAll(); }, [refreshAll]);
@@ -90,16 +97,19 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attempts' }, () => {
         refreshAttempts();
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'question_packages' }, () => {
+        refreshPackages();
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [refreshSessions, refreshAttempts]);
 
   return (
     <AppContext.Provider value={{
-      users, questions, sessions, attempts, logs, notifications,
+      users, questions, sessions, attempts, logs, notifications, packages,
       loading,
       refreshUsers, refreshQuestions, refreshSessions,
-      refreshAttempts, refreshLogs, refreshNotifications, refreshAll,
+      refreshAttempts, refreshLogs, refreshNotifications, refreshPackages, refreshAll,
     }}>
       {children}
     </AppContext.Provider>

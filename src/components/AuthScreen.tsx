@@ -14,6 +14,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [role, setRole] = useState<'dosen' | 'mahasiswa'>('mahasiswa');
   const [className, setClassName] = useState('');
+  const [dosenCode, setDosenCode] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -62,6 +63,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       return;
     }
 
+    if (role === 'dosen' && dosenCode !== 'DOSEN-UIR-2026') {
+      setError('Kode Registrasi Dosen tidak valid.');
+      return;
+    }
+
     if (password.length < 6) {
       setError('Password minimal 6 karakter.');
       return;
@@ -79,6 +85,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       setPassword('');
       setConfirmPassword('');
       setClassName('');
+      setDosenCode('');
       setRole('mahasiswa');
       setActiveTab('login');
       setSuccess('Pendaftaran berhasil! Silakan masuk dengan email dan password Anda.');
@@ -303,6 +310,24 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                   className="w-full px-4 py-3 rounded-xl glass-input text-sm"
                 />
               </div>
+
+              {role === 'dosen' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">
+                    Kode Registrasi Dosen
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Masukkan kode rahasia dosen"
+                    value={dosenCode}
+                    onChange={(e) => setDosenCode(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl glass-input text-sm border-uir-yellow-gold/30 focus:border-uir-yellow-gold/70"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    *Hubungi administrator untuk mendapatkan kode dosen.
+                  </p>
+                </div>
+              )}
 
               <button
                 type="submit"

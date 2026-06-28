@@ -6,7 +6,7 @@ import {
 import type { QuizSession, Question, Attempt, User } from '../dbService';
 import {
   Clock, Shield, AlertTriangle, CheckCircle, ChevronRight, ChevronLeft,
-  Send, Maximize, CornerUpLeft, X, Link2
+  Send, Maximize, CornerUpLeft, X, Link2, Volume2, VolumeX, Music, Music2, Mic, MicOff, Camera, AlertCircle
 } from 'lucide-react';
 import { WebcamProctor } from './WebcamProctor';
 import { LiveParticipantView } from './LiveParticipantView';
@@ -15,7 +15,9 @@ import { buildPodiumFromAttempts } from '../utils/scoring';
 import { QRJoinHint } from './QRJoinCard';
 import { useAppContext } from '../hooks/useAppContext';
 import { isAnswerCorrect } from '../utils/scoring';
-import { playCorrectSound, playWrongSound, playFinishSound, playTickSound } from '../utils/sounds';
+import { playCorrectSound, playWrongSound, playFinishSound, playTickSound, playQuizMusic, stopQuizMusic, isQuizMusicEnabled, setQuizMusicEnabled, isSoundEnabled, setSoundEnabled } from '../utils/sounds';
+import { speakQuestion, stopSpeaking, isTTSEnabled, setTTSEnabled, isTTSSupported, initTTS } from '../utils/tts';
+import jsQR from 'jsqr';
 
 // ─── Matching Question Sub-Component (extracted to respect Rules of Hooks) ────
 interface MatchingQuestionProps {
@@ -134,11 +136,12 @@ const MatchingQuestion: React.FC<MatchingQuestionProps> = ({ question, answers, 
 interface QuizAttemptScreenProps {
   user: User;
   onBack: () => void;
+  initialAccessCode?: string;
 }
 
 type QuizPhase = 'lobby' | 'in_progress' | 'live' | 'finished';
 
-export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBack }) => {
+export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBack, initialAccessCode }) => {
   const {
     sessions,
     attempts,
@@ -149,6 +152,7 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
 
   const [phase, setPhase] = useState<QuizPhase>('lobby');
   const [accessCode, setAccessCode] = useState(() => {
+    if (initialAccessCode) return initialAccessCode;
     const params = new URLSearchParams(window.location.search);
     return (params.get('code') || '').toUpperCase();
   });
@@ -173,6 +177,18 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
   const [showViolationBanner, setShowViolationBanner] = useState(false);
   const violationBannerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Sound & Speech states
+  const [musicOn, setMusicOn] = useState(isQuizMusicEnabled());
+  const [soundOn, setSoundOn] = useState(isSoundEnabled());
+  const [ttsOn, setTtsOn] = useState(isTTSEnabled);
+
+  // Lobby tabs & QR photo scan states
+  const [lobbyTab, setLobbyTab] = useState<'code' | 'qr'>('code');
+
+  const [qrError, setQrError] = useState('');
+  const [qrSuccess, setQrSuccess] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Finished attempt
   const [finalAttempt, setFinalAttempt] = useState<Attempt | null>(null);
@@ -316,6 +332,98 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
     setFeedback(null);
   }, [currentIdx, phase, session]);
 
+  // ─── Sound, Music & TTS Effects ──────────────────────────────────────────
+  useEffect(() => {
+    initTTS();
+    return () => {
+      stopSpeaking();
+      stopQuizMusic();
+    };
+  }, []);
+
+  // TTS Read aloud effect on question change
+  useEffect(() => {
+    if (phase === 'in_progress' && currentQuestion && ttsOn) {
+      stopSpeaking();
+      // small delay to let UI render
+      const timeout = setTimeout(() => {
+        speakQuestion(currentQuestion.text);
+      }, 500);
+      return () => clearTimeout(timeout);
+    } else {
+      stopSpeaking();
+    }
+  }, [currentIdx, phase, currentQuestion, ttsOn]);
+
+  // Background music effect
+  useEffect(() => {
+    if (phase === 'in_progress' && musicOn) {
+      playQuizMusic();
+    } else {
+      stopQuizMusic();
+    }
+    return () => stopQuizMusic();
+  }, [phase, musicOn]);
+
+  // ─── Scan QR from Photo Handler ───────────────────────────────────────────
+  const handleQRUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setQrError('');
+    setQrSuccess('');
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          setQrError('Gagal memproses gambar (canvas error).');
+          return;
+        }
+
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+
+        const imgData = ctx.getImageData(0, 0, img.width, img.height);
+        const code = jsQR(imgData.data, imgData.width, imgData.height);
+
+        if (code) {
+          const text = code.data;
+          // Look for access code parameter in URL (e.g. ?code=XYZ) or use exact text if short
+          let detectedCode = text;
+          try {
+            if (text.includes('?code=') || text.includes('&code=')) {
+              const urlParams = new URLSearchParams(text.split('?')[1]);
+              detectedCode = urlParams.get('code') || text;
+            } else if (text.includes('code=')) {
+              const parts = text.split('code=');
+              detectedCode = parts[1].split('&')[0];
+            }
+          } catch (err) {
+            console.error('Error parsing QR URL:', err);
+          }
+
+          detectedCode = detectedCode.trim().toUpperCase();
+          if (detectedCode.length > 10) {
+            detectedCode = detectedCode.substring(0, 8); // fallback limit
+          }
+
+          setAccessCode(detectedCode);
+          setQrSuccess(`Berhasil mendeteksi kode: ${detectedCode}`);
+          setLobbyTab('code');
+        } else {
+          setQrError('Tidak dapat menemukan QR Code dalam foto ini. Pastikan gambar jelas dan terang.');
+        }
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
   // ─── Lobby: Join Quiz ─────────────────────────────────────────────────────
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -423,48 +531,115 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
       <div className="space-y-6 max-w-xl mx-auto">
         <div>
           <h2 className="text-2xl font-bold text-white">Ikuti Kuis</h2>
-          <p className="text-slate-400 text-sm mt-1">Masukkan kode akses dari dosen untuk memulai ujian.</p>
+          <p className="text-slate-400 text-sm mt-1">Masukkan kode akses atau scan QR dari foto untuk memulai kuis.</p>
         </div>
 
-        {/* Join Form */}
+        {/* Tab selector manual vs QR photo */}
+        <div className="flex gap-2 p-1 rounded-2xl bg-slate-900/60 border border-slate-800">
+          <button
+            type="button"
+            onClick={() => setLobbyTab('code')}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all border ${
+              lobbyTab === 'code' ? 'lb-tab-active' : 'text-slate-400 border-transparent hover:text-slate-200'
+            }`}
+          >
+            🔑 Masukkan Kode
+          </button>
+          <button
+            type="button"
+            onClick={() => setLobbyTab('qr')}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all border ${
+              lobbyTab === 'qr' ? 'lb-tab-active' : 'text-slate-400 border-transparent hover:text-slate-200'
+            }`}
+          >
+            📸 Scan QR dari Foto
+          </button>
+        </div>
+
         <div className="glass rounded-2xl p-6 border border-slate-800">
-          <form onSubmit={handleJoin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Kode Akses Kuis</label>
-              <input
-                type="text"
-                required
-                maxLength={8}
-                placeholder="Contoh: WEB101"
-                value={accessCode}
-                onChange={e => setAccessCode(e.target.value.toUpperCase())}
-                className="w-full px-4 py-3.5 rounded-xl glass-input text-xl font-mono tracking-[0.2em] text-center uppercase"
-              />
-            </div>
-            {lobbyError && (
-              <div className="p-3 bg-red-950/40 border border-red-500/30 rounded-xl text-red-200 text-xs flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 shrink-0" />{lobbyError}
+          {lobbyTab === 'code' ? (
+            <form onSubmit={handleJoin} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Kode Akses Kuis</label>
+                <input
+                  type="text"
+                  required
+                  maxLength={8}
+                  placeholder="Contoh: WEB101"
+                  value={accessCode}
+                  onChange={e => setAccessCode(e.target.value.toUpperCase())}
+                  className="w-full px-4 py-3.5 rounded-xl glass-input text-xl font-mono tracking-[0.2em] text-center uppercase"
+                />
               </div>
-            )}
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Nama Tim (opsional)</label>
-              <input
-                type="text"
-                placeholder="Contoh: Tim Alpha"
-                value={teamName}
-                onChange={e => setTeamName(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl glass-input text-sm flex items-center gap-2"
-              />
+
+              {qrSuccess && (
+                <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl text-emerald-200 text-xs flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 shrink-0 text-emerald-400" /> {qrSuccess}
+                </div>
+              )}
+
+              {lobbyError && (
+                <div className="p-3 bg-red-950/40 border border-red-500/30 rounded-xl text-red-200 text-xs flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0" /> {lobbyError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Nama Tim (opsional)</label>
+                <input
+                  type="text"
+                  placeholder="Contoh: Tim Alpha"
+                  value={teamName}
+                  onChange={e => setTeamName(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl glass-input text-sm"
+                />
+              </div>
+
+              <div className="p-3 bg-uir-green-darker/20 border border-uir-green-medium/10 rounded-xl text-xs text-uir-green-muted flex items-center gap-2">
+                <Maximize className="h-4 w-4 shrink-0" />
+                Mode ujian resmi menggunakan layar penuh & proctoring. Mode latihan/PR lebih fleksibel.
+              </div>
+
+              <QRJoinHint />
+
+              <button
+                type="submit"
+                className="w-full py-3 bg-uir-green-medium hover:bg-uir-green-dark text-white font-semibold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-uir-green-dark/25 transition-all active:scale-[0.98] btn-press"
+              >
+                <ChevronRight className="h-5 w-5" /> Masuk & Mulai Kuis
+              </button>
+            </form>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-xs text-slate-400 text-center">
+                Pilih atau unggah file foto QR Code ujian Anda untuk mendeteksi kode akses kuis secara otomatis.
+              </p>
+
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="qr-drop-zone border-2 border-dashed border-slate-700 hover:border-uir-green-medium rounded-2xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-uir-green-darker/10 transition-all"
+              >
+                <Camera className="h-10 w-10 text-slate-500 hover:text-uir-green-medium" />
+                <div>
+                  <span className="text-sm text-slate-300 font-semibold">Klik untuk Unggah Gambar</span>
+                  <p className="text-xs text-slate-500 mt-1">Format PNG, JPG, JPEG</p>
+                </div>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept="image/*"
+                  onChange={handleQRUpload}
+                  className="hidden"
+                />
+              </div>
+
+              {qrError && (
+                <div className="p-3 bg-red-950/40 border border-red-500/30 rounded-xl text-red-200 text-xs flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-red-400" /> {qrError}
+                </div>
+              )}
             </div>
-            <div className="p-3 bg-uir-green-darker/20 border border-uir-green-medium/10 rounded-xl text-xs text-uir-green-muted flex items-center gap-2">
-              <Maximize className="h-4 w-4 shrink-0" />
-              Mode ujian resmi menggunakan layar penuh & proctoring. Mode latihan/PR lebih fleksibel.
-            </div>
-            <QRJoinHint />
-            <button type="submit" className="w-full py-3 bg-uir-green-medium hover:bg-uir-green-dark text-white font-semibold rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-uir-green-dark/25 transition-all active:scale-[0.98]">
-              <ChevronRight className="h-5 w-5" /> Masuk & Mulai Kuis
-            </button>
-          </form>
+          )}
         </div>
 
         {/* My History */}
@@ -536,9 +711,50 @@ export const QuizAttemptScreen: React.FC<QuizAttemptScreenProps> = ({ user, onBa
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            {isTTSSupported() && (
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !ttsOn;
+                  setTTSEnabled(next);
+                  setTtsOn(next);
+                  if (!next) stopSpeaking();
+                  else if (currentQuestion) speakQuestion(currentQuestion.text);
+                }}
+                className={`p-2 rounded-lg transition-all btn-press border ${ttsOn ? 'bg-uir-green-medium/20 text-uir-green-muted border-uir-green-medium/40' : 'bg-slate-850 border-slate-800 text-slate-500'}`}
+                title={ttsOn ? 'Matikan pembaca soal' : 'Aktifkan pembaca soal (TTS)'}
+              >
+                {ttsOn ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                const next = !musicOn;
+                setQuizMusicEnabled(next);
+                setMusicOn(next);
+              }}
+              className={`p-2 rounded-lg transition-all btn-press border ${musicOn ? 'bg-uir-green-medium/20 text-uir-green-muted border-uir-green-medium/40' : 'bg-slate-850 border-slate-800 text-slate-500'}`}
+              title={musicOn ? 'Matikan musik latar' : 'Aktifkan musik latar'}
+            >
+              {musicOn ? <Music className="h-4 w-4" /> : <Music2 className="h-4 w-4" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const next = !soundOn;
+                setSoundEnabled(next);
+                setSoundOn(next);
+              }}
+              className={`p-2 rounded-lg transition-all btn-press border ${soundOn ? 'bg-slate-700 border-slate-600 text-slate-350' : 'bg-slate-850 border-slate-800 text-slate-500'}`}
+              title={soundOn ? 'Matikan efek suara' : 'Aktifkan efek suara'}
+            >
+              {soundOn ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+            </button>
+
             {!isFullscreen && (
-              <button onClick={requestFullscreen} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600/15 border border-amber-500/30 text-amber-300 text-xs font-semibold hover:bg-amber-600/25">
+              <button onClick={requestFullscreen} className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-600/15 border border-amber-500/30 text-amber-300 text-xs font-semibold hover:bg-amber-600/25">
                 <Maximize className="h-3.5 w-3.5" /> Layar Penuh
               </button>
             )}

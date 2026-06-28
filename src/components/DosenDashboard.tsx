@@ -7,9 +7,12 @@ import { LeaderboardScreen } from './LeaderboardScreen';
 import { UserManagementView } from './UserManagementView';
 import { LiveMonitorView } from './LiveMonitorView';
 import { NotificationBell } from './NotificationBell';
-import { BookOpen, Calendar, BarChart2, Trophy, LogOut, GraduationCap, ChevronRight, Users, Activity, UserCircle } from 'lucide-react';
+import { AboutView } from './AboutView';
+import { ReportView } from './ReportView';
+import { BookOpen, Calendar, BarChart2, Trophy, LogOut, GraduationCap, ChevronRight, Users, Activity, UserCircle, Info, Flag } from 'lucide-react';
 import { ProfileView } from './ProfileView';
 import { UserAvatar } from './UserAvatar';
+import Aurora from './Aurora';
 
 interface DosenDashboardProps {
   user: User;
@@ -17,7 +20,7 @@ interface DosenDashboardProps {
   onUserUpdated: (user: User) => void;
 }
 
-type DosenTab = 'questions' | 'sessions' | 'students' | 'results' | 'leaderboard' | 'monitor' | 'profile';
+type DosenTab = 'questions' | 'sessions' | 'students' | 'results' | 'leaderboard' | 'monitor' | 'profile' | 'about' | 'report';
 
 const tabs: { id: DosenTab; label: string; icon: React.ElementType; desc: string }[] = [
   { id: 'questions',   label: 'Bank Soal',    icon: BookOpen,  desc: 'Kelola kumpulan soal kuis' },
@@ -27,6 +30,8 @@ const tabs: { id: DosenTab; label: string; icon: React.ElementType; desc: string
   { id: 'results',     label: 'Analitik Nilai', icon: BarChart2, desc: 'Lihat hasil dan statistik kelas' },
   { id: 'leaderboard', label: 'Peringkat',    icon: Trophy,    desc: 'Papan peringkat peserta kuis' },
   { id: 'profile',     label: 'Profil',       icon: UserCircle, desc: 'Edit foto profil dan data diri' },
+  { id: 'report',      label: 'Laporan',      icon: Flag,      desc: 'Kirim laporan bug atau masukan' },
+  { id: 'about',       label: 'Tentang',      icon: Info,      desc: 'Informasi tentang aplikasi' },
 ];
 
 export const DosenDashboard: React.FC<DosenDashboardProps> = ({ user, onLogout, onUserUpdated }) => {
@@ -38,9 +43,14 @@ export const DosenDashboard: React.FC<DosenDashboardProps> = ({ user, onLogout, 
   return (
     <div className="min-h-screen flex">
       {/* Sidebar */}
-      <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} shrink-0 transition-all duration-300 sidebar-gradient border-r border-slate-800/80 flex flex-col h-screen sticky top-0`}>
+      <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} shrink-0 transition-all duration-300 sidebar-gradient border-r border-slate-800/80 flex flex-col h-screen sticky top-0 relative overflow-hidden`}>
+        {/* Aurora Background Overlay */}
+        <div className="dashboard-aurora-wrap">
+          <Aurora speed={0.45} blend={0.65} amplitude={0.8} colorStops={["#7cff67", "#065D3E", "#033523"]} />
+        </div>
+
         {/* Logo */}
-        <div className={`flex items-center gap-3 px-4 py-5 border-b border-slate-800/80 ${!sidebarOpen ? 'justify-center' : ''}`}>
+        <div className={`flex items-center gap-3 px-4 py-5 border-b border-slate-800/80 relative z-10 ${!sidebarOpen ? 'justify-center' : ''}`}>
           <div className="p-2 rounded-xl bg-gradient-to-tr from-uir-green-dark to-uir-green-medium shrink-0 shadow-lg shadow-uir-green-dark/20">
             <GraduationCap className="h-5 w-5 text-white" />
           </div>
@@ -53,7 +63,7 @@ export const DosenDashboard: React.FC<DosenDashboardProps> = ({ user, onLogout, 
         </div>
 
         {/* Nav Items */}
-        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto relative z-10">
           {tabs.map(({ id, label, icon: Icon }, idx) => (
             <button
               key={id}
@@ -76,7 +86,7 @@ export const DosenDashboard: React.FC<DosenDashboardProps> = ({ user, onLogout, 
         </nav>
 
         {/* User Profile at Bottom */}
-        <div className="p-3 border-t border-slate-800/80 space-y-2">
+        <div className="p-3 border-t border-slate-800/80 space-y-2 relative z-10">
           {sidebarOpen && (
             <div className="px-3 py-2.5 rounded-xl bg-slate-950/40 animate-fade-in flex items-center gap-2.5">
               <UserAvatar user={user} size="sm" />
@@ -123,13 +133,15 @@ export const DosenDashboard: React.FC<DosenDashboardProps> = ({ user, onLogout, 
 
         <div className="flex-1 p-6 overflow-y-auto">
           <div className="animate-fade-in-up">
-            {activeTab === 'questions'   && <QuestionBankView />}
-            {activeTab === 'sessions'    && <SessionManagerView user={user} />}
+            {activeTab === 'questions' && <QuestionBankView currentUser={user} />}
+            {activeTab === 'sessions' && <SessionManagerView user={user} />}
             {activeTab === 'monitor'     && <LiveMonitorView />}
             {activeTab === 'students'    && <UserManagementView />}
             {activeTab === 'results'     && <ResultsAnalyticsView />}
             {activeTab === 'leaderboard' && <LeaderboardScreen />}
             {activeTab === 'profile' && <ProfileView user={user} onUserUpdated={onUserUpdated} />}
+            {activeTab === 'report' && <ReportView user={user} />}
+            {activeTab === 'about' && <AboutView />}
           </div>
         </div>
       </main>
