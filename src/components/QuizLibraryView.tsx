@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
-import { Search, BookOpen, Clock, Layers, Shield, Play } from 'lucide-react';
+import { Search, BookOpen, Clock, Shield, Play } from 'lucide-react';
 import { useAppContext } from '../hooks/useAppContext';
-import type { User, QuizSession } from '../dbService';
+import type { User } from '../dbService';
 
 interface QuizLibraryViewProps {
   user: User;
   onStartQuiz: (accessCode: string) => void;
 }
 
-export const QuizLibraryView: React.FC<QuizLibraryViewProps> = ({ user, onStartQuiz }) => {
-  const { sessions, allQuestions = [] } = useAppContext();
+export const QuizLibraryView: React.FC<QuizLibraryViewProps> = ({ onStartQuiz }) => {
+  const { sessions } = useAppContext();
   const [searchQuery, setSearchQuery] = useState('');
   const [subjectFilter, setSubjectFilter] = useState('');
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, Medal } from 'lucide-react';
+import { Trophy } from 'lucide-react';
 import { UserAvatar } from './UserAvatar';
 
 interface PodiumEntry {
@@ -22,16 +22,26 @@ export const PodiumView: React.FC<PodiumViewProps> = ({
   onClickUser,
 }) => {
   const top3 = entries.slice(0, 3);
-  const order = top3.length >= 3 ? [top3[1], top3[0], top3[2]] : top3;
 
-  const heights = ['h-24', 'h-36', 'h-20'];
-  const medals = ['🥈', '🥇', '🥉'];
+  // Podium visual order: [2nd, 1st, 3rd] — center is always tallest (1st place)
+  // Each slot can be empty if there aren't enough entries
+  const podiumSlots: (PodiumEntry | null)[] = [
+    top3[1] ?? null, // Left  — 2nd place (silver)
+    top3[0] ?? null, // Center — 1st place (gold)
+    top3[2] ?? null, // Right  — 3rd place (bronze)
+  ];
+
+  // Heights, medals, colors correspond to LEFT/CENTER/RIGHT visual positions
+  const heights    = ['h-24', 'h-36', 'h-20'];
+  const medals     = ['🥈', '🥇', '🥉'];
+  const ranks      = [2, 1, 3]; // rank numbers per visual slot
   const colors = [
     'from-slate-400/30 to-slate-500/10 border-slate-400/40',
     'from-amber-500/30 to-amber-600/10 border-amber-500/50',
     'from-orange-700/20 to-orange-800/10 border-orange-600/30',
   ];
   const avatarRingClass = ['avatar-rank-2', 'avatar-rank-1', 'avatar-rank-3'];
+
 
   if (entries.length === 0) {
     return (
@@ -47,13 +57,18 @@ export const PodiumView: React.FC<PodiumViewProps> = ({
         <Trophy className="h-5 w-5 text-amber-400" /> {title}
       </h3>
       <div className="flex items-end justify-center gap-4 px-4">
-        {order.map((entry, idx) => {
-          if (!entry) return null;
-          const rank = entries.indexOf(entry);
+        {podiumSlots.map((entry, idx) => {
+          if (!entry) return (
+            <div key={`empty-${idx}`} className="flex flex-col items-center flex-1 max-w-[120px] opacity-20">
+              <div className="mb-2 rounded-full bg-slate-800" style={{ width: 52, height: 52 }} />
+              <span className="text-2xl mb-1">{medals[idx]}</span>
+              <div className={`w-full ${heights[idx]} rounded-t-xl border border-slate-800 bg-slate-900/20`} />
+            </div>
+          );
           const canClick = !!onClickUser && !!entry.userId;
           return (
             <div
-              key={entry.name + rank}
+              key={entry.name + idx}
               className={`flex flex-col items-center flex-1 max-w-[120px] animate-fade-in-up ${canClick ? 'cursor-pointer' : ''}`}
               onClick={() => canClick && entry.userId && onClickUser(entry.userId)}
               style={{ animationDelay: `${idx * 80}ms` }}
@@ -76,13 +91,13 @@ export const PodiumView: React.FC<PodiumViewProps> = ({
                 )}
               </div>
 
-              <span className="text-3xl mb-1">{medals[idx] ?? '🏅'}</span>
-              <p className={`text-xs font-bold text-white text-center line-clamp-2 mb-1 ${canClick ? 'hover:text-uir-green-muted underline-offset-2' : ''}`}>
+              <span className="text-3xl mb-1">{medals[idx]}</span>
+              <p className={`text-xs font-bold text-white text-center line-clamp-2 mb-1 ${canClick ? 'hover:text-uir-green-muted' : ''}`}>
                 {entry.name}
               </p>
               <p className="text-lg font-black text-uir-yellow-gold mb-2">{entry.score}</p>
-              <div className={`w-full ${heights[idx] ?? 'h-16'} rounded-t-xl border bg-gradient-to-t ${colors[idx]} flex items-end justify-center pb-2`}>
-                <Medal className="h-5 w-5 text-white/60" />
+              <div className={`w-full ${heights[idx]} rounded-t-xl border bg-gradient-to-t ${colors[idx]} flex flex-col items-center justify-end pb-2`}>
+                <span className="text-white/50 text-xs font-bold">#{ranks[idx]}</span>
               </div>
             </div>
           );

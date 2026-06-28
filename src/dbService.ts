@@ -29,7 +29,6 @@ export interface Question {
   options?: string[];
   correctAnswer: string;
   explanation: string;
-  explanation: string;
   difficulty: 'easy' | 'medium' | 'hard';
 }
 
@@ -226,11 +225,7 @@ const packageToRow = (p: QuestionPackage) => ({
   created_at: p.createdAt, questions: p.questions,
 });
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const rowToReport = (r: any): Report => ({
-  id: r.id, userId: r.user_id, type: r.type,
-  message: r.message, status: r.status, timestamp: r.timestamp,
-});
+
 const reportToRow = (rep: Report) => ({
   id: rep.id, user_id: rep.userId, type: rep.type,
   message: rep.message, status: rep.status, timestamp: rep.timestamp,

@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   GraduationCap, Shield, Zap, Users, BookOpen, BarChart2, Globe,
-  Heart, Code, Mail, ExternalLink
+  Heart, Code, Mail
 } from 'lucide-react';
 
 export const AboutView: React.FC = () => {
