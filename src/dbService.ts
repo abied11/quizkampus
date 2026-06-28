@@ -372,14 +372,14 @@ export const dbGetGlobalLeaderboard = async (): Promise<GlobalLeaderboardEntry[]
     attemptMap[a.student_id].correct += a.correct_count;
   }
 
-  return (users ?? []).map((u, idx) => {
+  return (users ?? []).map((u: any, idx: number) => {
     const mapped = rowToUser(u);
     const stats = attemptMap[u.id];
     const scores = stats?.scores ?? [];
     return {
       user: mapped,
       totalQuizzes: scores.length,
-      avgScore: scores.length ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length) : 0,
+      avgScore: scores.length ? Math.round(scores.reduce((s: number, n: number) => s + n, 0) / scores.length) : 0,
       bestScore: scores.length ? Math.max(...scores) : 0,
       totalCorrect: stats?.correct ?? 0,
       rank: idx + 1,
@@ -416,15 +416,15 @@ export const dbGetPublicProfile = async (userId: string): Promise<PublicProfileD
   (sessions ?? []).forEach((s: { id: string; title: string }) => { sessionMap[s.id] = s.title; });
 
   const allAttempts = attempts ?? [];
-  const scores = allAttempts.map(a => a.score);
+  const scores = allAttempts.map((a: any) => a.score);
 
   return {
     user,
     totalQuizzes: scores.length,
-    avgScore: scores.length ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length) : 0,
+    avgScore: scores.length ? Math.round(scores.reduce((s: number, n: number) => s + n, 0) / scores.length) : 0,
     bestScore: scores.length ? Math.max(...scores) : 0,
-    totalCorrect: allAttempts.reduce((s, a) => s + (a.correct_count ?? 0), 0),
-    recentAttempts: allAttempts.slice(0, 5).map(a => ({
+    totalCorrect: allAttempts.reduce((s: number, a: any) => s + (a.correct_count ?? 0), 0),
+    recentAttempts: allAttempts.slice(0, 5).map((a: any) => ({
       sessionTitle: sessionMap[a.quiz_session_id] ?? 'Unknown',
       score: a.score,
       submitTime: a.submit_time ?? '',
@@ -744,8 +744,8 @@ export const dbGetFlashcardDue = async (userId: string, questions: Question[]): 
   if (error) return questions.slice(0, 20);
   const dueIds = new Set(
     (data ?? [])
-      .filter(r => new Date(r.next_review) <= new Date())
-      .map(r => r.question_id),
+      .filter((r: any) => new Date(r.next_review) <= new Date())
+      .map((r: any) => r.question_id),
   );
   const due = questions.filter(q => dueIds.has(q.id));
   return due.length > 0 ? due : questions.slice(0, 10);
